@@ -8,12 +8,10 @@ export type VolumeInputs = {
   accountsPerProspect: number;
   emailsPerAccount: number;
   whatsappPerAccount: number;
-  /** DMs sent to each account per day */
-  linkedinDmsPerAccountPerDay: number;
-  /** Connection requests sent to each account per day */
-  linkedinConnectionRequestsPerDay: number;
-  /** Connections on the LinkedIn sender profile */
-  linkedinConnections: number;
+  /** Total LinkedIn DMs across all accounts per month */
+  linkedinDmsPerMonth: number;
+  /** Total connection requests across all accounts per month */
+  linkedinConnectionRequestsPerMonth: number;
 };
 
 export type ToolToggles = {
@@ -86,10 +84,8 @@ export type DerivedVolume = {
   totalEmailsMonthly: number;
   totalWhatsappMonthly: number;
   aiArkCreditsPerCampaign: number;
-  linkedinDmsPerAccountPerDay: number;
-  linkedinConnectionRequestsPerDay: number;
-  totalLinkedinDmsDaily: number;
-  totalLinkedinConnectionRequestsDaily: number;
+  linkedinDmsPerMonth: number;
+  linkedinConnectionRequestsPerMonth: number;
   heyreachSendersForDms: number;
   heyreachSendersForConnections: number;
   heyreachSendersNeeded: number;
@@ -100,11 +96,18 @@ export type DerivedVolume = {
 
 /** Safe cold-email capacity per Inboxkit mailbox */
 export const EMAILS_PER_MAILBOX_PER_DAY = 20;
+/** Max DMs or connection requests entered per month (campaign total) */
+export const LINKEDIN_MONTHLY_INPUT_CAP = 6000;
 /** LinkedIn platform max DMs per sender profile per day */
-export const LINKEDIN_DM_CAP_PER_SENDER = 200;
-/** Max connection requests per day when profile has ≤1,000 connections */
-export const LINKEDIN_CONNECTION_CAP_UNDER_1K = 25;
-export const LINKEDIN_CONNECTION_THRESHOLD = 1000;
+export const LINKEDIN_DM_DAILY_CAP = 200;
+/** LinkedIn safe max connection requests per sender profile per day */
+export const LINKEDIN_CONNECTION_DAILY_CAP = 20;
+const DAYS_PER_MONTH = 30;
+/** Per-sender monthly capacity derived from daily limits */
+export const LINKEDIN_DM_MONTHLY_PER_SENDER =
+  LINKEDIN_DM_DAILY_CAP * DAYS_PER_MONTH;
+export const LINKEDIN_CONNECTION_MONTHLY_PER_SENDER =
+  LINKEDIN_CONNECTION_DAILY_CAP * DAYS_PER_MONTH;
 const MAILBOXES_PER_DOMAIN = 5;
 
 const APOLLO_MONTHLY: Record<ApolloPlan, number> = {
@@ -167,15 +170,11 @@ const INTERAKT_INR_PER_MESSAGE: Record<InteraktMessageType, number> = {
   service: 0,
 };
 
-export function capLinkedinConnectionRequests(
-  perAccount: number,
-  connections: number,
-): number {
-  const safe = Math.max(0, perAccount);
-  if (connections < LINKEDIN_CONNECTION_THRESHOLD) {
-    return Math.min(safe, LINKEDIN_CONNECTION_CAP_UNDER_1K);
-  }
-  return safe;
+export function capLinkedinMonthlyVolume(value: number): number {
+  return Math.min(
+    LINKEDIN_MONTHLY_INPUT_CAP,
+    Math.max(0, value),
+  );
 }
 
 /** Mailboxes from account count + email volume (~20 safe cold emails/mailbox/day). */
@@ -197,9 +196,8 @@ export function deriveVolume(volume: VolumeInputs): DerivedVolume {
     accountsPerProspect,
     emailsPerAccount,
     whatsappPerAccount,
-    linkedinDmsPerAccountPerDay,
-    linkedinConnectionRequestsPerDay,
-    linkedinConnections,
+    linkedinDmsPerMonth,
+    linkedinConnectionRequestsPerMonth,
   } = volume;
 
   const totalAccounts = prospects * accountsPerProspect;
@@ -207,30 +205,29 @@ export function deriveVolume(volume: VolumeInputs): DerivedVolume {
   const totalWhatsappMonthly = totalAccounts * whatsappPerAccount;
   const aiArkCreditsPerCampaign = totalEmailsMonthly;
 
-  const dmsPerAccount = Math.max(0, linkedinDmsPerAccountPerDay);
-  const connPerAccount = capLinkedinConnectionRequests(
-    linkedinConnectionRequestsPerDay,
-    linkedinConnections,
+  const linkedinDmsPerMonthCapped = capLinkedinMonthlyVolume(
+    linkedinDmsPerMonth,
+  );
+  const linkedinConnectionRequestsPerMonthCapped = capLinkedinMonthlyVolume(
+    linkedinConnectionRequestsPerMonth,
   );
 
-  const totalLinkedinDmsDaily = totalAccounts * dmsPerAccount;
-  const totalLinkedinConnectionRequestsDaily =
-    totalAccounts * connPerAccount;
-
   const heyreachSendersForDms =
-    dmsPerAccount > 0
-      ? Math.max(1, Math.ceil(totalLinkedinDmsDaily / LINKEDIN_DM_CAP_PER_SENDER))
-      : 0;
-  const connectionCapPerSender =
-    linkedinConnections < LINKEDIN_CONNECTION_THRESHOLD
-      ? LINKEDIN_CONNECTION_CAP_UNDER_1K
-      : 50;
-  const heyreachSendersForConnections =
-    connPerAccount > 0
+    linkedinDmsPerMonthCapped > 0
       ? Math.max(
           1,
           Math.ceil(
-            totalLinkedinConnectionRequestsDaily / connectionCapPerSender,
+            linkedinDmsPerMonthCapped / LINKEDIN_DM_MONTHLY_PER_SENDER,
+          ),
+        )
+      : 0;
+  const heyreachSendersForConnections =
+    linkedinConnectionRequestsPerMonthCapped > 0
+      ? Math.max(
+          1,
+          Math.ceil(
+            linkedinConnectionRequestsPerMonthCapped /
+              LINKEDIN_CONNECTION_MONTHLY_PER_SENDER,
           ),
         )
       : 0;
@@ -256,10 +253,9 @@ export function deriveVolume(volume: VolumeInputs): DerivedVolume {
     totalEmailsMonthly,
     totalWhatsappMonthly,
     aiArkCreditsPerCampaign,
-    linkedinDmsPerAccountPerDay: dmsPerAccount,
-    linkedinConnectionRequestsPerDay: connPerAccount,
-    totalLinkedinDmsDaily,
-    totalLinkedinConnectionRequestsDaily,
+    linkedinDmsPerMonth: linkedinDmsPerMonthCapped,
+    linkedinConnectionRequestsPerMonth:
+      linkedinConnectionRequestsPerMonthCapped,
     heyreachSendersForDms,
     heyreachSendersForConnections,
     heyreachSendersNeeded,
@@ -457,7 +453,7 @@ export function calculateCosts(config: CalculatorConfig): {
       tool: "HeyReach",
       label: `${plan} — ${senders} LinkedIn sender(s)`,
       amount: heyreachCost,
-      detail: `DMs: ${derived.totalLinkedinDmsDaily.toLocaleString()}/day (max ${LINKEDIN_DM_CAP_PER_SENDER}/sender) · Connections: ${derived.totalLinkedinConnectionRequestsDaily.toLocaleString()}/day`,
+      detail: `DMs: ${derived.linkedinDmsPerMonth.toLocaleString()}/mo (${LINKEDIN_DM_DAILY_CAP}/sender/day) · Connections: ${derived.linkedinConnectionRequestsPerMonth.toLocaleString()}/mo (${LINKEDIN_CONNECTION_DAILY_CAP}/sender/day)`,
     });
 
     if (

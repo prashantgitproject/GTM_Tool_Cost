@@ -4,13 +4,13 @@ import { useMemo, useState } from "react";
 import {
   AI_ARK_MONTHLY,
   calculateCosts,
-  capLinkedinConnectionRequests,
+  capLinkedinMonthlyVolume,
   DEFAULT_INR_TO_USD,
   deriveVolume,
   EMAILS_PER_MAILBOX_PER_DAY,
-  LINKEDIN_CONNECTION_CAP_UNDER_1K,
-  LINKEDIN_CONNECTION_THRESHOLD,
-  LINKEDIN_DM_CAP_PER_SENDER,
+  LINKEDIN_CONNECTION_DAILY_CAP,
+  LINKEDIN_DM_DAILY_CAP,
+  LINKEDIN_MONTHLY_INPUT_CAP,
   suggestAiArkTier,
   suggestApolloPlan,
   suggestHeyReachPlan,
@@ -32,9 +32,8 @@ const defaultVolume: VolumeInputs = {
   accountsPerProspect: 3,
   emailsPerAccount: 5,
   whatsappPerAccount: 2,
-  linkedinDmsPerAccountPerDay: 5,
-  linkedinConnectionRequestsPerDay: 20,
-  linkedinConnections: 500,
+  linkedinDmsPerMonth: 1500,
+  linkedinConnectionRequestsPerMonth: 600,
 };
 
 const defaultTools: ToolToggles = {
@@ -257,72 +256,39 @@ export function OutreachCalculator() {
                 />
               </Field>
               <Field
-                label="LinkedIn DMs per account / day"
-                hint={`Max ${LINKEDIN_DM_CAP_PER_SENDER} DMs per sender profile / day (platform)`}
+                label="LinkedIn DMs (total / month)"
+                hint={`Max ${LINKEDIN_MONTHLY_INPUT_CAP.toLocaleString()}/mo · ${LINKEDIN_DM_DAILY_CAP}/sender/day`}
               >
                 <input
                   type="number"
                   min={0}
+                  max={LINKEDIN_MONTHLY_INPUT_CAP}
                   className={inputClass}
-                  value={volume.linkedinDmsPerAccountPerDay}
+                  value={volume.linkedinDmsPerMonth}
                   onChange={(e) =>
                     updateVolume(
-                      "linkedinDmsPerAccountPerDay",
-                      Math.max(0, Number(e.target.value)),
+                      "linkedinDmsPerMonth",
+                      capLinkedinMonthlyVolume(Number(e.target.value)),
                     )
                   }
                 />
               </Field>
               <Field
-                label="Connection requests per account / day"
-                hint={
-                  volume.linkedinConnections < LINKEDIN_CONNECTION_THRESHOLD
-                    ? `Capped at ${LINKEDIN_CONNECTION_CAP_UNDER_1K}/day while under ${LINKEDIN_CONNECTION_THRESHOLD.toLocaleString()} connections`
-                    : "Higher limits apply after 1,000+ connections"
-                }
+                label="Connection requests (total / month)"
+                hint={`Max ${LINKEDIN_MONTHLY_INPUT_CAP.toLocaleString()}/mo · ${LINKEDIN_CONNECTION_DAILY_CAP}/sender/day`}
               >
                 <input
                   type="number"
                   min={0}
-                  max={
-                    volume.linkedinConnections < LINKEDIN_CONNECTION_THRESHOLD
-                      ? LINKEDIN_CONNECTION_CAP_UNDER_1K
-                      : undefined
-                  }
+                  max={LINKEDIN_MONTHLY_INPUT_CAP}
                   className={inputClass}
-                  value={volume.linkedinConnectionRequestsPerDay}
+                  value={volume.linkedinConnectionRequestsPerMonth}
                   onChange={(e) =>
                     updateVolume(
-                      "linkedinConnectionRequestsPerDay",
-                      capLinkedinConnectionRequests(
-                        Number(e.target.value),
-                        volume.linkedinConnections,
-                      ),
+                      "linkedinConnectionRequestsPerMonth",
+                      capLinkedinMonthlyVolume(Number(e.target.value)),
                     )
                   }
-                />
-              </Field>
-              <Field
-                label="LinkedIn connections (sender profile)"
-                hint="Under 1,000 → max 20–25 connection requests/day"
-              >
-                <input
-                  type="number"
-                  min={0}
-                  className={inputClass}
-                  value={volume.linkedinConnections}
-                  onChange={(e) => {
-                    const connections = Math.max(0, Number(e.target.value));
-                    setVolume((v) => ({
-                      ...v,
-                      linkedinConnections: connections,
-                      linkedinConnectionRequestsPerDay:
-                        capLinkedinConnectionRequests(
-                          v.linkedinConnectionRequestsPerDay,
-                          connections,
-                        ),
-                    }));
-                  }}
                 />
               </Field>
             </div>
@@ -369,15 +335,15 @@ export function OutreachCalculator() {
                 </dd>
               </div>
               <div>
-                <dt className="text-zinc-500">LinkedIn DMs / day (total)</dt>
+                <dt className="text-zinc-500">LinkedIn DMs / month</dt>
                 <dd className="font-semibold tabular-nums">
-                  {derivedPreview.totalLinkedinDmsDaily.toLocaleString()}
+                  {derivedPreview.linkedinDmsPerMonth.toLocaleString()}
                 </dd>
               </div>
               <div>
-                <dt className="text-zinc-500">Connection reqs / day</dt>
+                <dt className="text-zinc-500">Connections / month</dt>
                 <dd className="font-semibold tabular-nums">
-                  {derivedPreview.totalLinkedinConnectionRequestsDaily.toLocaleString()}
+                  {derivedPreview.linkedinConnectionRequestsPerMonth.toLocaleString()}
                 </dd>
               </div>
             </dl>
@@ -539,7 +505,7 @@ export function OutreachCalculator() {
             name="HeyReach"
             enabled={tools.heyreach}
             onToggle={() => toggleTool("heyreach")}
-            description={`Per LinkedIn sender; max ${LINKEDIN_DM_CAP_PER_SENDER} DMs/sender/day.`}
+            description={`Per sender: ${LINKEDIN_DM_DAILY_CAP} DMs/day · ${LINKEDIN_CONNECTION_DAILY_CAP} connections/day.`}
           >
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Plan">
