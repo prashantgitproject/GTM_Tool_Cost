@@ -177,17 +177,10 @@ export function capLinkedinMonthlyVolume(value: number): number {
   );
 }
 
-/** Mailboxes from account count + email volume (~20 safe cold emails/mailbox/day). */
-export function computeInboxkitMailboxes(
-  totalAccounts: number,
-  emailsPerAccount: number,
-): number {
-  if (totalAccounts <= 0) return 0;
-  const emailsPerAccountPerDay = emailsPerAccount / 30;
-  const totalEmailsPerDay = totalAccounts * emailsPerAccountPerDay;
-  const byVolume = Math.ceil(totalEmailsPerDay / EMAILS_PER_MAILBOX_PER_DAY);
-  const byAccounts = Math.ceil(totalAccounts / EMAILS_PER_MAILBOX_PER_DAY);
-  return Math.max(1, byVolume, byAccounts);
+/** Mailboxes from total email volume: ceil(total emails ÷ 20 safe emails/inbox). */
+export function computeInboxkitMailboxes(totalEmailsMonthly: number): number {
+  if (totalEmailsMonthly <= 0) return 0;
+  return Math.ceil(totalEmailsMonthly / EMAILS_PER_MAILBOX_PER_DAY);
 }
 
 export function deriveVolume(volume: VolumeInputs): DerivedVolume {
@@ -237,10 +230,7 @@ export function deriveVolume(volume: VolumeInputs): DerivedVolume {
     heyreachSendersForConnections,
   );
 
-  const inboxkitMailboxesNeeded = computeInboxkitMailboxes(
-    totalAccounts,
-    emailsPerAccount,
-  );
+  const inboxkitMailboxesNeeded = computeInboxkitMailboxes(totalEmailsMonthly);
   const inboxkitDomainsNeeded =
     inboxkitMailboxesNeeded > 0
       ? Math.ceil(inboxkitMailboxesNeeded / MAILBOXES_PER_DOMAIN)
@@ -372,7 +362,7 @@ export function calculateCosts(config: CalculatorConfig): {
       tool: "Inboxkit",
       label: `${mailboxes} mailbox(es), ${domains} domain(s)`,
       amount: mailboxCost + domainCostMonthly,
-      detail: `Auto: ${derived.totalAccounts.toLocaleString()} accounts @ ~${EMAILS_PER_MAILBOX_PER_DAY} emails/mailbox/day`,
+      detail: `Auto: ${derived.totalEmailsMonthly.toLocaleString()} emails ÷ ${EMAILS_PER_MAILBOX_PER_DAY}/inbox`,
     });
   }
 

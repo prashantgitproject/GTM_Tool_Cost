@@ -443,7 +443,7 @@ export function OutreachCalculator() {
             name="Inboxkit"
             enabled={tools.inboxkit}
             onToggle={() => toggleTool("inboxkit")}
-            description="Mailboxes auto-sized from accounts + email volume."
+            description="Mailboxes auto-sized from total email volume."
           >
             <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900/50">
               <div className="flex items-center justify-between gap-4">
@@ -453,9 +453,9 @@ export function OutreachCalculator() {
                 </span>
               </div>
               <p className="mt-2 text-xs text-zinc-500">
-                {derived.totalAccounts.toLocaleString()} accounts · ~
-                {EMAILS_PER_MAILBOX_PER_DAY} safe cold emails/mailbox/day ·{" "}
-                {derived.inboxkitDomainsNeeded} domain(s)
+                {derived.totalEmailsMonthly.toLocaleString()} emails ÷{" "}
+                {EMAILS_PER_MAILBOX_PER_DAY}/inbox · {derived.inboxkitDomainsNeeded}{" "}
+                domain(s)
               </p>
             </div>
             <Field label="Price per mailbox / month">
