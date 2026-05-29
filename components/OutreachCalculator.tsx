@@ -2,9 +2,15 @@
 
 import { useMemo, useState } from "react";
 import {
+  AI_ARK_MONTHLY,
   calculateCosts,
+  capLinkedinConnectionRequests,
   DEFAULT_INR_TO_USD,
   deriveVolume,
+  EMAILS_PER_MAILBOX_PER_DAY,
+  LINKEDIN_CONNECTION_CAP_UNDER_1K,
+  LINKEDIN_CONNECTION_THRESHOLD,
+  LINKEDIN_DM_CAP_PER_SENDER,
   suggestAiArkTier,
   suggestApolloPlan,
   suggestHeyReachPlan,
@@ -26,7 +32,9 @@ const defaultVolume: VolumeInputs = {
   accountsPerProspect: 3,
   emailsPerAccount: 5,
   whatsappPerAccount: 2,
-  linkedinDmsPerDay: 10,
+  linkedinDmsPerAccountPerDay: 5,
+  linkedinConnectionRequestsPerDay: 20,
+  linkedinConnections: 500,
 };
 
 const defaultTools: ToolToggles = {
@@ -86,9 +94,6 @@ export function OutreachCalculator() {
   const [aiArkTier, setAiArkTier] = useState<AiArkTier>("starter");
 
   const [inboxkitPricePerMailbox, setInboxkitPricePerMailbox] = useState(4.5);
-  const [inboxkitMailboxesOverride, setInboxkitMailboxesOverride] = useState<
-    number | null
-  >(null);
 
   const [smartleadPlan, setSmartleadPlan] = useState<SmartleadPlan>("basic");
   const [smartleadWarmup, setSmartleadWarmup] = useState(true);
@@ -116,7 +121,6 @@ export function OutreachCalculator() {
       aiArk: { tier: aiArkTier },
       inboxkit: {
         pricePerMailbox: inboxkitPricePerMailbox,
-        mailboxesOverride: inboxkitMailboxesOverride,
       },
       smartlead: { plan: smartleadPlan, includeWarmup: smartleadWarmup },
       heyreach: {
@@ -136,7 +140,6 @@ export function OutreachCalculator() {
       apolloSeats,
       aiArkTier,
       inboxkitPricePerMailbox,
-      inboxkitMailboxesOverride,
       smartleadPlan,
       smartleadWarmup,
       heyreachPlan,
@@ -172,7 +175,6 @@ export function OutreachCalculator() {
       suggestSmartleadPlan(d.totalAccounts, d.totalEmailsMonthly),
     );
     setHeyreachPlan(suggestHeyReachPlan(d.heyreachSendersNeeded));
-    setInboxkitMailboxesOverride(null);
     setHeyreachSendersOverride(null);
   }
 
@@ -256,20 +258,71 @@ export function OutreachCalculator() {
               </Field>
               <Field
                 label="LinkedIn DMs per account / day"
-                hint="HeyReach cap: 20 per sender per day"
+                hint={`Max ${LINKEDIN_DM_CAP_PER_SENDER} DMs per sender profile / day (platform)`}
               >
                 <input
                   type="number"
                   min={0}
-                  max={20}
                   className={inputClass}
-                  value={volume.linkedinDmsPerDay}
+                  value={volume.linkedinDmsPerAccountPerDay}
                   onChange={(e) =>
                     updateVolume(
-                      "linkedinDmsPerDay",
-                      Math.min(20, Math.max(0, Number(e.target.value))),
+                      "linkedinDmsPerAccountPerDay",
+                      Math.max(0, Number(e.target.value)),
                     )
                   }
+                />
+              </Field>
+              <Field
+                label="Connection requests per account / day"
+                hint={
+                  volume.linkedinConnections < LINKEDIN_CONNECTION_THRESHOLD
+                    ? `Capped at ${LINKEDIN_CONNECTION_CAP_UNDER_1K}/day while under ${LINKEDIN_CONNECTION_THRESHOLD.toLocaleString()} connections`
+                    : "Higher limits apply after 1,000+ connections"
+                }
+              >
+                <input
+                  type="number"
+                  min={0}
+                  max={
+                    volume.linkedinConnections < LINKEDIN_CONNECTION_THRESHOLD
+                      ? LINKEDIN_CONNECTION_CAP_UNDER_1K
+                      : undefined
+                  }
+                  className={inputClass}
+                  value={volume.linkedinConnectionRequestsPerDay}
+                  onChange={(e) =>
+                    updateVolume(
+                      "linkedinConnectionRequestsPerDay",
+                      capLinkedinConnectionRequests(
+                        Number(e.target.value),
+                        volume.linkedinConnections,
+                      ),
+                    )
+                  }
+                />
+              </Field>
+              <Field
+                label="LinkedIn connections (sender profile)"
+                hint="Under 1,000 → max 20–25 connection requests/day"
+              >
+                <input
+                  type="number"
+                  min={0}
+                  className={inputClass}
+                  value={volume.linkedinConnections}
+                  onChange={(e) => {
+                    const connections = Math.max(0, Number(e.target.value));
+                    setVolume((v) => ({
+                      ...v,
+                      linkedinConnections: connections,
+                      linkedinConnectionRequestsPerDay:
+                        capLinkedinConnectionRequests(
+                          v.linkedinConnectionRequestsPerDay,
+                          connections,
+                        ),
+                    }));
+                  }}
                 />
               </Field>
             </div>
@@ -294,21 +347,37 @@ export function OutreachCalculator() {
                 </dd>
               </div>
               <div>
-                <dt className="text-zinc-500">LinkedIn senders (est.)</dt>
+                <dt className="text-zinc-500">AI Ark credits (campaign)</dt>
                 <dd className="font-semibold tabular-nums">
-                  {derivedPreview.heyreachSendersNeeded}
+                  {derivedPreview.aiArkCreditsPerCampaign.toLocaleString()}
                 </dd>
               </div>
               <div>
-                <dt className="text-zinc-500">Inboxkit mailboxes (est.)</dt>
+                <dt className="text-zinc-500">Inboxkit mailboxes (auto)</dt>
                 <dd className="font-semibold tabular-nums">
                   {derivedPreview.inboxkitMailboxesNeeded}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-zinc-500">LinkedIn senders (est.)</dt>
+                <dd className="font-semibold tabular-nums">
+                  {derivedPreview.heyreachSendersNeeded}
+                  <span className="ml-1 text-xs font-normal text-zinc-500">
+                    (DMs: {derivedPreview.heyreachSendersForDms}, conn:{" "}
+                    {derivedPreview.heyreachSendersForConnections})
+                  </span>
                 </dd>
               </div>
               <div>
                 <dt className="text-zinc-500">LinkedIn DMs / day (total)</dt>
                 <dd className="font-semibold tabular-nums">
                   {derivedPreview.totalLinkedinDmsDaily.toLocaleString()}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-zinc-500">Connection reqs / day</dt>
+                <dd className="font-semibold tabular-nums">
+                  {derivedPreview.totalLinkedinConnectionRequestsDaily.toLocaleString()}
                 </dd>
               </div>
             </dl>
@@ -397,42 +466,42 @@ export function OutreachCalculator() {
                 <option value="scale-450k">Scale 450K+ — $399/mo</option>
               </select>
             </Field>
+            <AiArkCostCreditsPanel
+              tier={aiArkTier}
+              billing={billing}
+              campaignCredits={derived.aiArkCreditsPerCampaign}
+            />
           </ToolCard>
 
           <ToolCard
             name="Inboxkit"
             enabled={tools.inboxkit}
             onToggle={() => toggleTool("inboxkit")}
-            description="Mailboxes + domains; ~20 safe cold emails/mailbox/day."
+            description="Mailboxes auto-sized from accounts + email volume."
           >
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Price per mailbox / month">
-                <input
-                  type="number"
-                  step={0.01}
-                  min={0}
-                  className={inputClass}
-                  value={inboxkitPricePerMailbox}
-                  onChange={(e) => setInboxkitPricePerMailbox(Number(e.target.value))}
-                />
-              </Field>
-              <Field
-                label="Mailboxes (override)"
-                hint={`Auto: ${derived.inboxkitMailboxesNeeded} — leave blank for auto`}
-              >
-                <input
-                  type="number"
-                  min={0}
-                  placeholder="Auto"
-                  className={inputClass}
-                  value={inboxkitMailboxesOverride ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setInboxkitMailboxesOverride(v === "" ? null : Math.max(0, Number(v)));
-                  }}
-                />
-              </Field>
+            <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-zinc-600 dark:text-zinc-400">Mailboxes (auto)</span>
+                <span className="text-lg font-semibold tabular-nums">
+                  {derived.inboxkitMailboxesNeeded}
+                </span>
+              </div>
+              <p className="mt-2 text-xs text-zinc-500">
+                {derived.totalAccounts.toLocaleString()} accounts · ~
+                {EMAILS_PER_MAILBOX_PER_DAY} safe cold emails/mailbox/day ·{" "}
+                {derived.inboxkitDomainsNeeded} domain(s)
+              </p>
             </div>
+            <Field label="Price per mailbox / month">
+              <input
+                type="number"
+                step={0.01}
+                min={0}
+                className={inputClass}
+                value={inboxkitPricePerMailbox}
+                onChange={(e) => setInboxkitPricePerMailbox(Number(e.target.value))}
+              />
+            </Field>
           </ToolCard>
 
           <ToolCard
@@ -470,7 +539,7 @@ export function OutreachCalculator() {
             name="HeyReach"
             enabled={tools.heyreach}
             onToggle={() => toggleTool("heyreach")}
-            description="Per LinkedIn sender; max 20 DMs/sender/day."
+            description={`Per LinkedIn sender; max ${LINKEDIN_DM_CAP_PER_SENDER} DMs/sender/day.`}
           >
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Plan">
@@ -600,7 +669,7 @@ export function OutreachCalculator() {
               <tr className="border-b border-zinc-100 text-zinc-500 dark:border-zinc-800">
                 <th className="px-6 py-3 font-medium">Tool</th>
                 <th className="px-6 py-3 font-medium">Line item</th>
-                <th className="px-6 py-3 font-medium">Detail</th>
+                <th className="px-6 py-3 font-medium">Credits / detail</th>
                 <th className="px-6 py-3 text-right font-medium">USD / mo</th>
               </tr>
             </thead>
@@ -616,7 +685,20 @@ export function OutreachCalculator() {
                   <td className="px-6 py-3 text-zinc-700 dark:text-zinc-300">
                     {item.label}
                   </td>
-                  <td className="px-6 py-3 text-zinc-500">{item.detail ?? "—"}</td>
+                  <td className="px-6 py-3 text-zinc-500">
+                    {item.creditsUsed != null ? (
+                      <span>
+                        <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                          {item.creditsUsed.toLocaleString()}
+                        </span>
+                        {" / "}
+                        {item.creditsIncluded?.toLocaleString()} included
+                        {item.detail ? ` · ${item.detail}` : ""}
+                      </span>
+                    ) : (
+                      (item.detail ?? "—")
+                    )}
+                  </td>
                   <td className="px-6 py-3 text-right tabular-nums font-medium">
                     {formatUsd(item.amount)}
                   </td>
@@ -641,6 +723,58 @@ export function OutreachCalculator() {
         Estimates based on 2026 public pricing. AI Ark Builder tiers use indicative
         list prices where not published. Verify with vendors before budgeting.
       </p>
+    </div>
+  );
+}
+
+function AiArkCostCreditsPanel({
+  tier,
+  billing,
+  campaignCredits,
+}: {
+  tier: AiArkTier;
+  billing: BillingCycle;
+  campaignCredits: number;
+}) {
+  const tierInfo = AI_ARK_MONTHLY[tier];
+  const monthlyPrice =
+    billing === "annual" ? tierInfo.price * 0.8 : tierInfo.price;
+  const overPlan = campaignCredits > tierInfo.credits;
+
+  return (
+    <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-blue-100 bg-blue-50/60 p-4 dark:border-blue-900/40 dark:bg-blue-950/30">
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-blue-700 dark:text-blue-300">
+          Campaign credits
+        </p>
+        <p className="mt-1 text-2xl font-bold tabular-nums text-zinc-900 dark:text-zinc-50">
+          {campaignCredits.toLocaleString()}
+        </p>
+        <p className="mt-0.5 text-xs text-zinc-500">1 credit per email</p>
+      </div>
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-blue-700 dark:text-blue-300">
+          Plan cost / month
+        </p>
+        <p className="mt-1 text-2xl font-bold tabular-nums text-zinc-900 dark:text-zinc-50">
+          {formatUsd(monthlyPrice)}
+        </p>
+        <p className="mt-0.5 text-xs text-zinc-500">
+          Includes {tierInfo.credits.toLocaleString()} credits/mo
+        </p>
+      </div>
+      {overPlan ? (
+        <p className="col-span-2 text-xs text-amber-700 dark:text-amber-300">
+          Campaign exceeds plan by{" "}
+          {(campaignCredits - tierInfo.credits).toLocaleString()} credits — consider
+          a higher tier.
+        </p>
+      ) : (
+        <p className="col-span-2 text-xs text-emerald-700 dark:text-emerald-300">
+          {(tierInfo.credits - campaignCredits).toLocaleString()} credits remaining
+          in plan this month (if single campaign).
+        </p>
+      )}
     </div>
   );
 }

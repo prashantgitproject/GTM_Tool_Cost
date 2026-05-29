@@ -8,7 +8,12 @@ export type VolumeInputs = {
   accountsPerProspect: number;
   emailsPerAccount: number;
   whatsappPerAccount: number;
-  linkedinDmsPerDay: number;
+  /** DMs sent to each account per day */
+  linkedinDmsPerAccountPerDay: number;
+  /** Connection requests sent to each account per day */
+  linkedinConnectionRequestsPerDay: number;
+  /** Connections on the LinkedIn sender profile */
+  linkedinConnections: number;
 };
 
 export type ToolToggles = {
@@ -50,7 +55,6 @@ export type CalculatorConfig = {
   };
   inboxkit: {
     pricePerMailbox: number;
-    mailboxesOverride: number | null;
   };
   smartlead: {
     plan: SmartleadPlan;
@@ -73,22 +77,34 @@ export type LineItem = {
   label: string;
   amount: number;
   detail?: string;
+  creditsUsed?: number;
+  creditsIncluded?: number;
 };
 
 export type DerivedVolume = {
   totalAccounts: number;
   totalEmailsMonthly: number;
   totalWhatsappMonthly: number;
-  linkedinDmsPerDayCapped: number;
+  aiArkCreditsPerCampaign: number;
+  linkedinDmsPerAccountPerDay: number;
+  linkedinConnectionRequestsPerDay: number;
   totalLinkedinDmsDaily: number;
+  totalLinkedinConnectionRequestsDaily: number;
+  heyreachSendersForDms: number;
+  heyreachSendersForConnections: number;
   heyreachSendersNeeded: number;
   inboxkitMailboxesNeeded: number;
   inboxkitDomainsNeeded: number;
   apolloCreditsNeeded: number;
 };
 
-const EMAILS_PER_MAILBOX_PER_DAY = 20;
-const HEYREACH_DM_CAP_PER_SENDER = 20;
+/** Safe cold-email capacity per Inboxkit mailbox */
+export const EMAILS_PER_MAILBOX_PER_DAY = 20;
+/** LinkedIn platform max DMs per sender profile per day */
+export const LINKEDIN_DM_CAP_PER_SENDER = 200;
+/** Max connection requests per day when profile has ≤1,000 connections */
+export const LINKEDIN_CONNECTION_CAP_UNDER_1K = 25;
+export const LINKEDIN_CONNECTION_THRESHOLD = 1000;
 const MAILBOXES_PER_DOMAIN = 5;
 
 const APOLLO_MONTHLY: Record<ApolloPlan, number> = {
@@ -112,7 +128,7 @@ const APOLLO_CREDITS: Record<ApolloPlan, number> = {
   organization: 15000,
 };
 
-const AI_ARK_MONTHLY: Record<AiArkTier, { price: number; credits: number }> = {
+export const AI_ARK_MONTHLY: Record<AiArkTier, { price: number; credits: number }> = {
   starter: { price: 49, credits: 30_000 },
   "builder-60k": { price: 99, credits: 60_000 },
   "builder-120k": { price: 149, credits: 120_000 },
@@ -151,34 +167,83 @@ const INTERAKT_INR_PER_MESSAGE: Record<InteraktMessageType, number> = {
   service: 0,
 };
 
+export function capLinkedinConnectionRequests(
+  perAccount: number,
+  connections: number,
+): number {
+  const safe = Math.max(0, perAccount);
+  if (connections < LINKEDIN_CONNECTION_THRESHOLD) {
+    return Math.min(safe, LINKEDIN_CONNECTION_CAP_UNDER_1K);
+  }
+  return safe;
+}
+
+/** Mailboxes from account count + email volume (~20 safe cold emails/mailbox/day). */
+export function computeInboxkitMailboxes(
+  totalAccounts: number,
+  emailsPerAccount: number,
+): number {
+  if (totalAccounts <= 0) return 0;
+  const emailsPerAccountPerDay = emailsPerAccount / 30;
+  const totalEmailsPerDay = totalAccounts * emailsPerAccountPerDay;
+  const byVolume = Math.ceil(totalEmailsPerDay / EMAILS_PER_MAILBOX_PER_DAY);
+  const byAccounts = Math.ceil(totalAccounts / EMAILS_PER_MAILBOX_PER_DAY);
+  return Math.max(1, byVolume, byAccounts);
+}
+
 export function deriveVolume(volume: VolumeInputs): DerivedVolume {
   const {
     prospects,
     accountsPerProspect,
     emailsPerAccount,
     whatsappPerAccount,
-    linkedinDmsPerDay,
+    linkedinDmsPerAccountPerDay,
+    linkedinConnectionRequestsPerDay,
+    linkedinConnections,
   } = volume;
 
   const totalAccounts = prospects * accountsPerProspect;
   const totalEmailsMonthly = totalAccounts * emailsPerAccount;
   const totalWhatsappMonthly = totalAccounts * whatsappPerAccount;
-  const linkedinDmsPerDayCapped = Math.min(
-    Math.max(0, linkedinDmsPerDay),
-    HEYREACH_DM_CAP_PER_SENDER,
+  const aiArkCreditsPerCampaign = totalEmailsMonthly;
+
+  const dmsPerAccount = Math.max(0, linkedinDmsPerAccountPerDay);
+  const connPerAccount = capLinkedinConnectionRequests(
+    linkedinConnectionRequestsPerDay,
+    linkedinConnections,
   );
-  const totalLinkedinDmsDaily =
-    totalAccounts * linkedinDmsPerDayCapped;
-  const heyreachSendersNeeded =
-    linkedinDmsPerDayCapped > 0
-      ? Math.max(1, Math.ceil(totalLinkedinDmsDaily / HEYREACH_DM_CAP_PER_SENDER))
+
+  const totalLinkedinDmsDaily = totalAccounts * dmsPerAccount;
+  const totalLinkedinConnectionRequestsDaily =
+    totalAccounts * connPerAccount;
+
+  const heyreachSendersForDms =
+    dmsPerAccount > 0
+      ? Math.max(1, Math.ceil(totalLinkedinDmsDaily / LINKEDIN_DM_CAP_PER_SENDER))
+      : 0;
+  const connectionCapPerSender =
+    linkedinConnections < LINKEDIN_CONNECTION_THRESHOLD
+      ? LINKEDIN_CONNECTION_CAP_UNDER_1K
+      : 50;
+  const heyreachSendersForConnections =
+    connPerAccount > 0
+      ? Math.max(
+          1,
+          Math.ceil(
+            totalLinkedinConnectionRequestsDaily / connectionCapPerSender,
+          ),
+        )
       : 0;
 
-  const emailsPerDay = totalEmailsMonthly / 30;
-  const inboxkitMailboxesNeeded =
-    totalEmailsMonthly > 0
-      ? Math.max(1, Math.ceil(emailsPerDay / EMAILS_PER_MAILBOX_PER_DAY))
-      : 0;
+  const heyreachSendersNeeded = Math.max(
+    heyreachSendersForDms,
+    heyreachSendersForConnections,
+  );
+
+  const inboxkitMailboxesNeeded = computeInboxkitMailboxes(
+    totalAccounts,
+    emailsPerAccount,
+  );
   const inboxkitDomainsNeeded =
     inboxkitMailboxesNeeded > 0
       ? Math.ceil(inboxkitMailboxesNeeded / MAILBOXES_PER_DOMAIN)
@@ -190,8 +255,13 @@ export function deriveVolume(volume: VolumeInputs): DerivedVolume {
     totalAccounts,
     totalEmailsMonthly,
     totalWhatsappMonthly,
-    linkedinDmsPerDayCapped,
+    aiArkCreditsPerCampaign,
+    linkedinDmsPerAccountPerDay: dmsPerAccount,
+    linkedinConnectionRequestsPerDay: connPerAccount,
     totalLinkedinDmsDaily,
+    totalLinkedinConnectionRequestsDaily,
+    heyreachSendersForDms,
+    heyreachSendersForConnections,
     heyreachSendersNeeded,
     inboxkitMailboxesNeeded,
     inboxkitDomainsNeeded,
@@ -281,36 +351,33 @@ export function calculateCosts(config: CalculatorConfig): {
     if (isAnnual) {
       price = applyAnnualDiscount(price, 0.2);
     }
-    if (derived.apolloCreditsNeeded > tier.credits) {
+    const campaignCredits = derived.aiArkCreditsPerCampaign;
+    if (campaignCredits > tier.credits) {
       warnings.push(
-        `AI Ark ${config.aiArk.tier} includes ${tier.credits.toLocaleString()} credits/mo; you need ~${derived.apolloCreditsNeeded.toLocaleString()}.`,
+        `AI Ark ${config.aiArk.tier} includes ${tier.credits.toLocaleString()} credits/mo; this campaign needs ~${campaignCredits.toLocaleString()}.`,
       );
     }
     lineItems.push({
       tool: "AI Ark",
-      label: `${config.aiArk.tier} (${tier.credits.toLocaleString()} credits)`,
+      label: `${config.aiArk.tier} plan`,
       amount: price,
-      detail: isAnnual ? "20% annual discount applied" : "Monthly",
+      detail: `${campaignCredits.toLocaleString()} credits/campaign · plan includes ${tier.credits.toLocaleString()}/mo`,
+      creditsUsed: campaignCredits,
+      creditsIncluded: tier.credits,
     });
   }
 
   if (config.tools.inboxkit) {
-    const mailboxes =
-      config.inboxkit.mailboxesOverride ?? derived.inboxkitMailboxesNeeded;
-    const domains = Math.ceil(mailboxes / MAILBOXES_PER_DOMAIN);
+    const mailboxes = derived.inboxkitMailboxesNeeded;
+    const domains = derived.inboxkitDomainsNeeded;
     const mailboxCost = mailboxes * config.inboxkit.pricePerMailbox;
     const domainCostMonthly = (domains * 13) / 12;
     lineItems.push({
       tool: "Inboxkit",
       label: `${mailboxes} mailbox(es), ${domains} domain(s)`,
       amount: mailboxCost + domainCostMonthly,
-      detail: `~${EMAILS_PER_MAILBOX_PER_DAY} safe cold emails/mailbox/day`,
+      detail: `Auto: ${derived.totalAccounts.toLocaleString()} accounts @ ~${EMAILS_PER_MAILBOX_PER_DAY} emails/mailbox/day`,
     });
-    if (derived.totalEmailsMonthly > 0 && mailboxes < derived.inboxkitMailboxesNeeded) {
-      warnings.push(
-        `Inboxkit: recommended ${derived.inboxkitMailboxesNeeded} mailbox(es) for volume; you selected ${mailboxes}.`,
-      );
-    }
   }
 
   if (config.tools.smartlead) {
@@ -390,7 +457,7 @@ export function calculateCosts(config: CalculatorConfig): {
       tool: "HeyReach",
       label: `${plan} — ${senders} LinkedIn sender(s)`,
       amount: heyreachCost,
-      detail: `Up to ${HEYREACH_DM_CAP_PER_SENDER} DMs/sender/day`,
+      detail: `DMs: ${derived.totalLinkedinDmsDaily.toLocaleString()}/day (max ${LINKEDIN_DM_CAP_PER_SENDER}/sender) · Connections: ${derived.totalLinkedinConnectionRequestsDaily.toLocaleString()}/day`,
     });
 
     if (
