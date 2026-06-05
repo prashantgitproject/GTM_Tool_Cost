@@ -21,9 +21,6 @@ export const metadata: Metadata = {
   title: "Outreach Tool Cost Calculator | ClarityHQ",
   description:
     "Estimate monthly GTM stack cost by account volume, channel mix, and touch points.",
-  icons: {
-    icon: "http://www.clarityhq.ai/assets/img/favicon.svg",
-  },
 };
 
 export default function RootLayout({

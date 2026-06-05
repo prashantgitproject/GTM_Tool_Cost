@@ -23,7 +23,7 @@ export const CLARITY_THEME = {
     serif: "var(--font-clarity-serif)",
     sans: "var(--font-clarity-sans)",
   },
-  logoUrl: "http://www.clarityhq.ai/assets/img/favicon.svg",
+  logoUrl: "/clarityhq-icon.svg",
 } as const;
 
 export type OutreachChannel = "email" | "linkedin" | "whatsapp";
