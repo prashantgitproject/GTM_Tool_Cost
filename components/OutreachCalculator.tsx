@@ -17,6 +17,10 @@ import {
   calculateHeyReachUsageCost,
   calculateInboxkitUsageCost,
   calculateSmartleadUsageCost,
+  getSmartleadPlanWarnings,
+  SMARTLEAD_PLAN_DETAILS,
+  SMARTLEAD_WARMUP_ADDON_MONTHLY,
+  DEFAULT_DOMAIN_COST_YEARLY,
   DEFAULT_INR_TO_USD,
   deriveVolume,
   EMAILS_PER_MAILBOX_PER_DAY,
@@ -103,7 +107,9 @@ export function OutreachCalculator() {
 
   const [aiArkTier, setAiArkTier] = useState<AiArkTier>("starter");
 
-  const [inboxkitPricePerMailbox, setInboxkitPricePerMailbox] = useState(4.5);
+  const [inboxkitDomainCostYearly, setInboxkitDomainCostYearly] = useState(
+    DEFAULT_DOMAIN_COST_YEARLY,
+  );
 
   const [smartleadPlan, setSmartleadPlan] = useState<SmartleadPlan>("basic");
   const [smartleadWarmup, setSmartleadWarmup] = useState(false);
@@ -125,8 +131,8 @@ export function OutreachCalculator() {
   );
 
   const derivedPreview = useMemo(
-    () => deriveVolume(effectiveVolume),
-    [effectiveVolume],
+    () => deriveVolume(effectiveVolume, inboxkitDomainCostYearly),
+    [effectiveVolume, inboxkitDomainCostYearly],
   );
 
   const config: CalculatorConfig = useMemo(
@@ -139,7 +145,7 @@ export function OutreachCalculator() {
       apollo: { plan: apolloPlan, seats: apolloSeats },
       aiArk: { tier: aiArkTier },
       inboxkit: {
-        pricePerMailbox: inboxkitPricePerMailbox,
+        domainCostYearly: inboxkitDomainCostYearly,
       },
       smartlead: { plan: smartleadPlan, includeWarmup: smartleadWarmup },
       heyreach: {
@@ -159,7 +165,7 @@ export function OutreachCalculator() {
       apolloPlan,
       apolloSeats,
       aiArkTier,
-      inboxkitPricePerMailbox,
+      inboxkitDomainCostYearly,
       smartleadPlan,
       smartleadWarmup,
       heyreachPlan,
@@ -512,8 +518,25 @@ export function OutreachCalculator() {
             name="Inboxkit"
             enabled={tools.inboxkit}
             onToggle={() => toggleTool("inboxkit")}
-            description={`$${USAGE_PRICING.inboxkit.planPrice}/mo · ${USAGE_PRICING.inboxkit.inboxesIncluded} inboxes · ${USAGE_PRICING.inboxkit.emailsPerInboxPerDay} emails/inbox/day · domain $${USAGE_PRICING.inboxkit.domainCostYearly}/yr.`}
+            description={`$${USAGE_PRICING.inboxkit.planPrice}/mo · ${USAGE_PRICING.inboxkit.inboxesIncluded} inboxes · ${USAGE_PRICING.inboxkit.emailsPerInboxPerDay} emails/inbox/day`}
           >
+            <Field
+              label="Domain cost / year (USD)"
+              hint={`Default $${DEFAULT_DOMAIN_COST_YEARLY}/yr · used in ($/12)/mo × accounts/750`}
+            >
+              <input
+                type="number"
+                step={0.01}
+                min={0}
+                className={inputClass}
+                value={inboxkitDomainCostYearly}
+                onChange={(e) =>
+                  setInboxkitDomainCostYearly(
+                    Math.max(0, Number(e.target.value)),
+                  )
+                }
+              />
+            </Field>
             <UsageCostPanel
               credits={derived.totalEmailsMonthly}
               creditsLabel="Emails / month"
@@ -522,6 +545,7 @@ export function OutreachCalculator() {
                 calculateInboxkitUsageCost(
                   derived.totalAccounts,
                   volume.emailsPerAccount,
+                  inboxkitDomainCostYearly,
                 ).total
               }
               rateLabel={`Domain ${formatUsd(derived.inboxkitDomainCostPerAccount)}/acct · Inbox ${formatUsd(derived.inboxkitInboxCostPerAccount)}/acct`}
@@ -534,19 +558,60 @@ export function OutreachCalculator() {
             name="Smartlead"
             enabled={tools.smartlead}
             onToggle={() => toggleTool("smartlead")}
-            description={`$${USAGE_PRICING.smartlead.pricePerMonth}/mo per ${USAGE_PRICING.smartlead.sendsPerMonth.toLocaleString()} sends.`}
+            description="Usage-based: (plan price ÷ plan send limit) × your monthly sends."
           >
+            <Field label="Plan">
+              <select
+                className={selectClass}
+                value={smartleadPlan}
+                onChange={(e) =>
+                  setSmartleadPlan(e.target.value as SmartleadPlan)
+                }
+              >
+                <option value="basic">
+                  Basic — ${SMARTLEAD_PLAN_DETAILS.basic.price}/mo ·{" "}
+                  {SMARTLEAD_PLAN_DETAILS.basic.contacts.toLocaleString()}{" "}
+                  contacts ·{" "}
+                  {SMARTLEAD_PLAN_DETAILS.basic.sends.toLocaleString()} sends
+                </option>
+                <option value="pro">
+                  Pro — ${SMARTLEAD_PLAN_DETAILS.pro.price}/mo ·{" "}
+                  {SMARTLEAD_PLAN_DETAILS.pro.contacts.toLocaleString()}{" "}
+                  contacts ·{" "}
+                  {SMARTLEAD_PLAN_DETAILS.pro.sends.toLocaleString()} sends ·{" "}
+                  {SMARTLEAD_PLAN_DETAILS.pro.verifiedEmails?.toLocaleString()}{" "}
+                  verified emails
+                </option>
+              </select>
+            </Field>
+            {getSmartleadPlanWarnings(
+              smartleadPlan,
+              derived.totalAccounts,
+              derived.totalEmailsMonthly,
+            ).map((w) => (
+              <p
+                key={w}
+                className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900"
+              >
+                {w}
+              </p>
+            ))}
             <UsageCostPanel
               credits={derived.totalEmailsMonthly}
               creditsLabel="Sends / month"
-              creditsHint={`${volume.emailsPerAccount} touch pt(s) × ${derived.totalAccounts.toLocaleString()} accounts`}
+              creditsHint={`${derived.totalAccounts.toLocaleString()} contacts · ${volume.emailsPerAccount} touch pt(s)/account`}
               cost={calculateSmartleadUsageCost(
+                smartleadPlan,
                 derived.totalAccounts,
                 volume.emailsPerAccount,
               )}
-              rateLabel={`$${USAGE_PRICING.smartlead.pricePerMonth} / ${USAGE_PRICING.smartlead.sendsPerMonth.toLocaleString()} sends`}
+              rateLabel={
+                smartleadPlan === "pro"
+                  ? `$${SMARTLEAD_PLAN_DETAILS.pro.price}/${SMARTLEAD_PLAN_DETAILS.pro.sends.toLocaleString()} × ${derived.totalEmailsMonthly.toLocaleString()} sends`
+                  : `$${SMARTLEAD_PLAN_DETAILS.basic.price}/${SMARTLEAD_PLAN_DETAILS.basic.sends.toLocaleString()} × ${derived.totalEmailsMonthly.toLocaleString()} sends`
+              }
             />
-            <Field label="AI Warmup Pool (+$59/mo)">
+            <Field label={`AI Warmup Pool (+$${SMARTLEAD_WARMUP_ADDON_MONTHLY}/mo)`}>
               <select
                 className={selectClass}
                 value={smartleadWarmup ? "yes" : "no"}

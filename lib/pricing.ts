@@ -61,7 +61,8 @@ export type CalculatorConfig = {
     tier: AiArkTier;
   };
   inboxkit: {
-    pricePerMailbox: number;
+    /** Domain registration cost per year (USD) */
+    domainCostYearly: number;
   };
   smartlead: {
     plan: SmartleadPlan;
@@ -188,21 +189,48 @@ export const AI_ARK_MONTHLY: Record<AiArkTier, { price: number; credits: number 
   "scale-450k": { price: 399, credits: 450_000 },
 };
 
+export const SMARTLEAD_WARMUP_ADDON_MONTHLY = 59;
+
+export const SMARTLEAD_PLAN_DETAILS: Record<
+  Exclude<SmartleadPlan, "custom">,
+  {
+    label: string;
+    price: number;
+    contacts: number;
+    sends: number;
+    verifiedEmails?: number;
+  }
+> = {
+  basic: {
+    label: "Basic",
+    price: USAGE_PRICING.smartlead.pricePerMonth,
+    contacts: 2_000,
+    sends: USAGE_PRICING.smartlead.sendsPerMonth,
+  },
+  pro: {
+    label: "Pro",
+    price: 78,
+    contacts: 30_000,
+    sends: 90_000,
+    verifiedEmails: 30_000,
+  },
+};
+
 const SMARTLEAD_MONTHLY: Record<SmartleadPlan, number> = {
-  basic: 39,
-  pro: 79,
+  basic: SMARTLEAD_PLAN_DETAILS.basic.price,
+  pro: SMARTLEAD_PLAN_DETAILS.pro.price,
   custom: 94,
 };
 
 const SMARTLEAD_LEAD_LIMIT: Record<SmartleadPlan, number> = {
-  basic: 2000,
-  pro: 30_000,
+  basic: SMARTLEAD_PLAN_DETAILS.basic.contacts,
+  pro: SMARTLEAD_PLAN_DETAILS.pro.contacts,
   custom: Infinity,
 };
 
 const SMARTLEAD_SEND_LIMIT: Record<SmartleadPlan, number> = {
-  basic: 6000,
-  pro: Infinity,
+  basic: SMARTLEAD_PLAN_DETAILS.basic.sends,
+  pro: SMARTLEAD_PLAN_DETAILS.pro.sends,
   custom: Infinity,
 };
 
@@ -238,12 +266,16 @@ export function calculateFreckleUsageCost(accounts: number): number {
  * At 4 email touch points: 100 emails/domain/day × 30 days ÷ 4 = 750 accounts/domain
  * e.g. 100 accounts → (14/12) × 100/750 ≈ $0.16/mo
  */
+export const DEFAULT_DOMAIN_COST_YEARLY: number =
+  USAGE_PRICING.inboxkit.domainCostYearly;
+
 export function calculateInboxkitDomainCost(
   accounts: number,
   emailTouchPoints: number,
+  domainCostYearly: number = DEFAULT_DOMAIN_COST_YEARLY,
 ): number {
-  if (emailTouchPoints <= 0 || accounts <= 0) return 0;
-  const { domainCostYearly, emailsPerDomainPerDay } = USAGE_PRICING.inboxkit;
+  if (emailTouchPoints <= 0 || accounts <= 0 || domainCostYearly <= 0) return 0;
+  const { emailsPerDomainPerDay } = USAGE_PRICING.inboxkit;
   const domainCostMonthly = domainCostYearly / 12;
   const emailsPerDomainPerMonth = emailsPerDomainPerDay * DAYS_PER_MONTH;
   const accountsPerDomain = emailsPerDomainPerMonth / emailTouchPoints;
@@ -252,8 +284,9 @@ export function calculateInboxkitDomainCost(
 
 export function calculateInboxkitDomainCostPerAccount(
   emailTouchPoints: number,
+  domainCostYearly: number = DEFAULT_DOMAIN_COST_YEARLY,
 ): number {
-  return calculateInboxkitDomainCost(1, emailTouchPoints);
+  return calculateInboxkitDomainCost(1, emailTouchPoints, domainCostYearly);
 }
 
 /** Inbox: $99/30 inboxes, 25 emails/inbox/day → accounts covered per inbox */
@@ -272,22 +305,110 @@ export function calculateInboxkitInboxCostPerAccount(
 export function calculateInboxkitUsageCost(
   accounts: number,
   emailTouchPoints: number,
+  domainCostYearly: number = DEFAULT_DOMAIN_COST_YEARLY,
 ): { domain: number; inbox: number; total: number } {
-  const domain = calculateInboxkitDomainCost(accounts, emailTouchPoints);
+  const domain = calculateInboxkitDomainCost(
+    accounts,
+    emailTouchPoints,
+    domainCostYearly,
+  );
   const inboxPerAccount = calculateInboxkitInboxCostPerAccount(emailTouchPoints);
   const inbox = accounts * inboxPerAccount;
   return { domain, inbox, total: domain + inbox };
 }
 
-/** Smartlead: $32 / 6000 sends × total emails */
+function getSmartleadPlanRates(
+  plan: SmartleadPlan,
+): { price: number; sends: number; label: string } {
+  if (plan === "custom") {
+    return {
+      price: SMARTLEAD_MONTHLY.custom,
+      sends: SMARTLEAD_PLAN_DETAILS.pro.sends,
+      label: "Custom",
+    };
+  }
+  const details = SMARTLEAD_PLAN_DETAILS[plan];
+  return { price: details.price, sends: details.sends, label: details.label };
+}
+
+/**
+ * Smartlead usage cost: (planPrice / planSendLimit) × total sends
+ * Basic: $32/6,000 × sends — e.g. 100 accounts × 4 touch = 400 → $2.13/mo
+ * Pro: $78/90,000 × sends
+ */
 export function calculateSmartleadUsageCost(
+  plan: SmartleadPlan,
   accounts: number,
   emailTouchPoints: number,
 ): number {
-  if (emailTouchPoints <= 0) return 0;
-  const { pricePerMonth, sendsPerMonth } = USAGE_PRICING.smartlead;
-  const totalEmails = accounts * emailTouchPoints;
-  return (pricePerMonth / sendsPerMonth) * totalEmails;
+  if (emailTouchPoints <= 0 || accounts <= 0) return 0;
+  const totalSends = accounts * emailTouchPoints;
+  const { price, sends } = getSmartleadPlanRates(plan);
+  return (price / sends) * totalSends;
+}
+
+/** Usage cost + optional flat warmup add-on */
+export function calculateSmartleadCost(
+  plan: SmartleadPlan,
+  accounts: number,
+  emailTouchPoints: number,
+  includeWarmup: boolean,
+): number {
+  let cost = calculateSmartleadUsageCost(plan, accounts, emailTouchPoints);
+  if (includeWarmup) {
+    cost += SMARTLEAD_WARMUP_ADDON_MONTHLY;
+  }
+  return cost;
+}
+
+export function getSmartleadPlanWarnings(
+  plan: SmartleadPlan,
+  totalAccounts: number,
+  totalSends: number,
+): string[] {
+  const warnings: string[] = [];
+  const contactLimit = SMARTLEAD_LEAD_LIMIT[plan];
+  const sendLimit = SMARTLEAD_SEND_LIMIT[plan];
+  const exceedsContacts = totalAccounts > contactLimit;
+  const exceedsSends = sendLimit !== Infinity && totalSends > sendLimit;
+
+  if (plan === "basic" && (exceedsContacts || exceedsSends)) {
+    const parts: string[] = [];
+    if (exceedsContacts) {
+      parts.push(
+        `${totalAccounts.toLocaleString()} contacts (Basic max ${contactLimit.toLocaleString()})`,
+      );
+    }
+    if (exceedsSends) {
+      parts.push(
+        `${totalSends.toLocaleString()} sends (Basic max ${sendLimit.toLocaleString()})`,
+      );
+    }
+    warnings.push(
+      `Smartlead Basic cannot support your volume (${parts.join(" · ")}). Upgrade to Pro — $${SMARTLEAD_PLAN_DETAILS.pro.price}/mo, ${SMARTLEAD_PLAN_DETAILS.pro.contacts.toLocaleString()} contacts, ${SMARTLEAD_PLAN_DETAILS.pro.sends.toLocaleString()} email sends.`,
+    );
+  }
+
+  if (plan === "pro" && (exceedsContacts || exceedsSends)) {
+    if (exceedsContacts) {
+      warnings.push(
+        `Smartlead Pro includes ${contactLimit.toLocaleString()} contacts; you have ${totalAccounts.toLocaleString()}.`,
+      );
+    }
+    if (exceedsSends) {
+      warnings.push(
+        `Smartlead Pro includes ${sendLimit.toLocaleString()} email sends/mo; you need ~${totalSends.toLocaleString()}.`,
+      );
+    }
+  }
+
+  if (plan === "custom" && (exceedsContacts || exceedsSends)) {
+    warnings.push(
+      `Volume exceeds Pro plan limits (${totalAccounts.toLocaleString()} contacts, ${totalSends.toLocaleString()} sends). Contact Smartlead for Custom pricing.`,
+    );
+  }
+
+  return warnings;
 }
 
 /** HeyReach: $79/sender, 200 msgs/day → accounts covered per sender */
@@ -314,7 +435,10 @@ export function computeInboxkitMailboxes(totalEmailsMonthly: number): number {
   return Math.ceil(totalEmailsMonthly / emailsPerInboxPerMonth);
 }
 
-export function deriveVolume(volume: VolumeInputs): DerivedVolume {
+export function deriveVolume(
+  volume: VolumeInputs,
+  domainCostYearly: number = DEFAULT_DOMAIN_COST_YEARLY,
+): DerivedVolume {
   const {
     prospects,
     accountsPerProspect,
@@ -361,7 +485,7 @@ export function deriveVolume(volume: VolumeInputs): DerivedVolume {
   const apolloCreditsNeeded = totalEmailsMonthly;
 
   const inboxkitDomainCostPerAccount =
-    calculateInboxkitDomainCostPerAccount(emailsPerAccount);
+    calculateInboxkitDomainCostPerAccount(emailsPerAccount, domainCostYearly);
   const inboxkitInboxCostPerAccount =
     calculateInboxkitInboxCostPerAccount(emailsPerAccount);
 
@@ -466,7 +590,8 @@ export function calculateCosts(config: CalculatorConfig): {
   warnings: string[];
 } {
   const effectiveVolume = applyChannelVolume(config.volume, config.channels);
-  const derived = deriveVolume(effectiveVolume);
+  const domainCostYearly = config.inboxkit.domainCostYearly;
+  const derived = deriveVolume(effectiveVolume, domainCostYearly);
   const lineItems: LineItem[] = [];
   const warnings: string[] = [];
   const isAnnual = config.billing === "annual";
@@ -528,6 +653,7 @@ export function calculateCosts(config: CalculatorConfig): {
     const { domain, inbox, total } = calculateInboxkitUsageCost(
       totalAccounts,
       emailTouchPoints,
+      domainCostYearly,
     );
     const accountsPerDomain =
       (USAGE_PRICING.inboxkit.emailsPerDomainPerDay * DAYS_PER_MONTH) /
@@ -536,7 +662,7 @@ export function calculateCosts(config: CalculatorConfig): {
       tool: "Inboxkit",
       label: `Domain (${totalAccounts.toLocaleString()} accounts)`,
       amount: domain,
-      detail: `($${USAGE_PRICING.inboxkit.domainCostYearly}/12)/mo × ${totalAccounts}/${Math.round(accountsPerDomain)} accounts/domain`,
+      detail: `($${domainCostYearly}/12)/mo × ${totalAccounts}/${Math.round(accountsPerDomain)} accounts/domain`,
     });
     lineItems.push({
       tool: "Inboxkit",
@@ -551,19 +677,31 @@ export function calculateCosts(config: CalculatorConfig): {
   }
 
   if (toolEnabled(config, "smartlead")) {
-    const usageCost = calculateSmartleadUsageCost(totalAccounts, emailTouchPoints);
+    const plan = config.smartlead.plan;
     const totalSends = totalAccounts * emailTouchPoints;
+    const { price: planPrice, sends: planSends, label: planLabel } =
+      getSmartleadPlanRates(plan);
+    const usageCost = calculateSmartleadUsageCost(
+      plan,
+      totalAccounts,
+      emailTouchPoints,
+    );
+
+    warnings.push(
+      ...getSmartleadPlanWarnings(plan, totalAccounts, totalSends),
+    );
+
     lineItems.push({
       tool: "Smartlead",
-      label: `${totalSends.toLocaleString()} sends`,
+      label: `${totalSends.toLocaleString()} sends (${planLabel})`,
       amount: usageCost,
-      detail: `$32/mo per 6,000 sends · ${emailTouchPoints} touch pt(s)/account`,
+      detail: `$${planPrice}/${planSends.toLocaleString()} × ${totalSends.toLocaleString()} sends · ${emailTouchPoints} touch pt(s)/account`,
     });
     if (config.smartlead.includeWarmup) {
       lineItems.push({
         tool: "Smartlead",
         label: "AI Warmup Pool add-on",
-        amount: 59,
+        amount: SMARTLEAD_WARMUP_ADDON_MONTHLY,
       });
     }
   }
