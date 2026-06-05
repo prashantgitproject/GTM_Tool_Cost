@@ -1,26 +1,37 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --clarity-bg: #f5f5f0;
+  --clarity-surface: #ffffff;
+  --clarity-ink: #1a1410;
+  --clarity-text: #1c1c1c;
+  --clarity-muted: #6b5c4e;
+  --clarity-border: #b8a68a;
+  --clarity-accent: #d4a59a;
+  --clarity-accent-active: #a8b5a0;
+  --clarity-gold: #d4af37;
+  --clarity-panel: #f5f5f0;
+  --clarity-steel: #8b9a9c;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-clarity-bg: var(--clarity-bg);
+  --color-clarity-surface: var(--clarity-surface);
+  --color-clarity-ink: var(--clarity-ink);
+  --color-clarity-text: var(--clarity-text);
+  --color-clarity-muted: var(--clarity-muted);
+  --color-clarity-border: var(--clarity-border);
+  --color-clarity-accent: var(--clarity-accent);
+  --color-clarity-accent-active: var(--clarity-accent-active);
+  --color-clarity-gold: var(--clarity-gold);
+  --color-clarity-panel: var(--clarity-panel);
+  --color-clarity-steel: var(--clarity-steel);
+  --font-sans: var(--font-clarity-sans);
+  --font-serif: var(--font-clarity-serif);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--clarity-bg);
+  color: var(--clarity-text);
+  font-family: var(--font-clarity-sans), system-ui, sans-serif;
 }

@@ -1,20 +1,31 @@
 "use client";
 
+import Image from "next/image";
 import { useMemo, useState } from "react";
+import { ChannelToggleBar } from "@/components/ChannelToggleBar";
 import {
-  AI_ARK_MONTHLY,
+  CLARITY_THEME,
+  DEFAULT_CHANNELS,
+  type ChannelToggles,
+  type OutreachChannel,
+} from "@/lib/clarity-theme";
+import {
+  applyChannelVolume,
   calculateCosts,
-  capLinkedinMonthlyVolume,
+  calculateAiArkUsageCost,
+  calculateFreckleUsageCost,
+  calculateHeyReachUsageCost,
+  calculateInboxkitUsageCost,
+  calculateSmartleadUsageCost,
   DEFAULT_INR_TO_USD,
   deriveVolume,
   EMAILS_PER_MAILBOX_PER_DAY,
-  LINKEDIN_CONNECTION_DAILY_CAP,
   LINKEDIN_DM_DAILY_CAP,
-  LINKEDIN_MONTHLY_INPUT_CAP,
   suggestAiArkTier,
   suggestApolloPlan,
   suggestHeyReachPlan,
   suggestSmartleadPlan,
+  USAGE_PRICING,
   type AiArkTier,
   type ApolloPlan,
   type BillingCycle,
@@ -29,20 +40,20 @@ import {
 
 const defaultVolume: VolumeInputs = {
   prospects: 100,
-  accountsPerProspect: 3,
-  emailsPerAccount: 5,
-  whatsappPerAccount: 2,
-  linkedinDmsPerMonth: 1500,
-  linkedinConnectionRequestsPerMonth: 600,
+  accountsPerProspect: 1,
+  emailsPerAccount: 4,
+  whatsappPerAccount: 0,
+  linkedinTouchPointsPerAccount: 2,
 };
 
 const defaultTools: ToolToggles = {
-  apollo: true,
-  aiArk: false,
+  apollo: false,
+  aiArk: true,
+  freckle: true,
   inboxkit: true,
   smartlead: true,
   heyreach: true,
-  interakt: true,
+  interakt: false,
 };
 
 function formatUsd(n: number): string {
@@ -65,25 +76,24 @@ function Field({
 }) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-        {label}
-      </span>
+      <span className="text-sm font-medium text-clarity-ink">{label}</span>
       {children}
       {hint ? (
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">{hint}</span>
+        <span className="text-xs text-clarity-muted">{hint}</span>
       ) : null}
     </label>
   );
 }
 
 const inputClass =
-  "w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100";
+  "w-full rounded-lg border border-clarity-border/60 bg-clarity-surface px-3 py-2 text-sm text-clarity-text shadow-sm outline-none transition focus:border-clarity-accent focus:ring-2 focus:ring-clarity-accent/25";
 
 const selectClass = inputClass;
 
 export function OutreachCalculator() {
   const [volume, setVolume] = useState<VolumeInputs>(defaultVolume);
   const [tools, setTools] = useState<ToolToggles>(defaultTools);
+  const [channels, setChannels] = useState<ChannelToggles>(DEFAULT_CHANNELS);
   const [billing, setBilling] = useState<BillingCycle>("monthly");
   const [inrToUsd, setInrToUsd] = useState(DEFAULT_INR_TO_USD);
 
@@ -95,7 +105,7 @@ export function OutreachCalculator() {
   const [inboxkitPricePerMailbox, setInboxkitPricePerMailbox] = useState(4.5);
 
   const [smartleadPlan, setSmartleadPlan] = useState<SmartleadPlan>("basic");
-  const [smartleadWarmup, setSmartleadWarmup] = useState(true);
+  const [smartleadWarmup, setSmartleadWarmup] = useState(false);
 
   const [heyreachPlan, setHeyreachPlan] = useState<HeyReachPlan>("growth-1");
   const [heyreachSendersOverride, setHeyreachSendersOverride] = useState<
@@ -108,12 +118,21 @@ export function OutreachCalculator() {
   const [interaktMessageType, setInteraktMessageType] =
     useState<InteraktMessageType>("marketing");
 
-  const derivedPreview = useMemo(() => deriveVolume(volume), [volume]);
+  const effectiveVolume = useMemo(
+    () => applyChannelVolume(volume, channels),
+    [volume, channels],
+  );
+
+  const derivedPreview = useMemo(
+    () => deriveVolume(effectiveVolume),
+    [effectiveVolume],
+  );
 
   const config: CalculatorConfig = useMemo(
     () => ({
       volume,
       tools,
+      channels,
       billing,
       inrToUsd,
       apollo: { plan: apolloPlan, seats: apolloSeats },
@@ -133,6 +152,7 @@ export function OutreachCalculator() {
     [
       volume,
       tools,
+      channels,
       billing,
       inrToUsd,
       apolloPlan,
@@ -166,6 +186,10 @@ export function OutreachCalculator() {
     setTools((t) => ({ ...t, [key]: !t[key] }));
   }
 
+  function toggleChannel(channel: OutreachChannel) {
+    setChannels((c) => ({ ...c, [channel]: !c[channel] }));
+  }
+
   function autoSuggestPlans() {
     const d = deriveVolume(volume);
     setApolloPlan(suggestApolloPlan(d.apolloCreditsNeeded));
@@ -182,23 +206,45 @@ export function OutreachCalculator() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
       <header className="mb-10">
-        <p className="text-sm font-medium uppercase tracking-wider text-blue-600 dark:text-blue-400">
-          GTM Stack
-        </p>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-4xl">
+        <div className="flex items-center gap-3">
+          <Image
+            src={CLARITY_THEME.logoUrl}
+            alt={CLARITY_THEME.brand.displayName}
+            width={32}
+            height={32}
+            className="h-8 w-8"
+            unoptimized
+          />
+          <p className="text-sm font-medium uppercase tracking-wider text-clarity-muted">
+            {CLARITY_THEME.access.keyName}
+          </p>
+        </div>
+        <h1 className="mt-3 font-serif text-3xl font-semibold tracking-tight text-clarity-ink sm:text-4xl">
           Outreach Tool Cost Calculator
         </h1>
-        <p className="mt-3 max-w-2xl text-zinc-600 dark:text-zinc-400">
-          Model monthly stack cost from prospect volume, channel mix, and 2026
-          pricing for Apollo, AI Ark, Inboxkit, Smartlead, HeyReach, and
-          Interakt. Toggle tools off to exclude them from the total.
+        <p className="mt-3 max-w-2xl text-clarity-muted">
+          Model monthly stack cost from account volume and touch points for{" "}
+          {CLARITY_THEME.brand.displayName}. Include or exclude channels to see
+          usage-based costs for AI Ark, Freckle, Inboxkit, Smartlead, and
+          HeyReach.
         </p>
       </header>
 
+      <section className="mb-8 rounded-2xl border border-clarity-border/60 bg-clarity-surface p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-clarity-ink">Channels</h2>
+        <p className="mt-1 text-sm text-clarity-muted">
+          Include or exclude outreach channels. Excluded channels remove related
+          tools and touch points from the cost estimate.
+        </p>
+        <div className="mt-5">
+          <ChannelToggleBar channels={channels} onToggle={toggleChannel} />
+        </div>
+      </section>
+
       <div className="grid gap-8 lg:grid-cols-5">
         <section className="space-y-6 lg:col-span-2">
-          <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+          <div className="rounded-2xl border border-clarity-border/60 bg-clarity-surface p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-clarity-ink">
               Campaign volume
             </h2>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -227,125 +273,138 @@ export function OutreachCalculator() {
                   }
                 />
               </Field>
-              <Field label="Emails per account / month" hint="1 Apollo credit per email">
-                <input
-                  type="number"
-                  min={0}
-                  className={inputClass}
-                  value={volume.emailsPerAccount}
-                  onChange={(e) =>
-                    updateVolume(
-                      "emailsPerAccount",
-                      Math.max(0, Number(e.target.value)),
-                    )
-                  }
-                />
-              </Field>
-              <Field label="WhatsApp messages per account / month">
-                <input
-                  type="number"
-                  min={0}
-                  className={inputClass}
-                  value={volume.whatsappPerAccount}
-                  onChange={(e) =>
-                    updateVolume(
-                      "whatsappPerAccount",
-                      Math.max(0, Number(e.target.value)),
-                    )
-                  }
-                />
-              </Field>
-              <Field
-                label="LinkedIn DMs (total / month)"
-                hint={`Max ${LINKEDIN_MONTHLY_INPUT_CAP.toLocaleString()}/mo · ${LINKEDIN_DM_DAILY_CAP}/sender/day`}
-              >
-                <input
-                  type="number"
-                  min={0}
-                  max={LINKEDIN_MONTHLY_INPUT_CAP}
-                  className={inputClass}
-                  value={volume.linkedinDmsPerMonth}
-                  onChange={(e) =>
-                    updateVolume(
-                      "linkedinDmsPerMonth",
-                      capLinkedinMonthlyVolume(Number(e.target.value)),
-                    )
-                  }
-                />
-              </Field>
-              <Field
-                label="Connection requests (total / month)"
-                hint={`Max ${LINKEDIN_MONTHLY_INPUT_CAP.toLocaleString()}/mo · ${LINKEDIN_CONNECTION_DAILY_CAP}/sender/day`}
-              >
-                <input
-                  type="number"
-                  min={0}
-                  max={LINKEDIN_MONTHLY_INPUT_CAP}
-                  className={inputClass}
-                  value={volume.linkedinConnectionRequestsPerMonth}
-                  onChange={(e) =>
-                    updateVolume(
-                      "linkedinConnectionRequestsPerMonth",
-                      capLinkedinMonthlyVolume(Number(e.target.value)),
-                    )
-                  }
-                />
-              </Field>
+              {channels.email ? (
+                <Field
+                  label="Email touch points / account"
+                  hint="e.g. 4 emails per account per month"
+                >
+                  <input
+                    type="number"
+                    min={0}
+                    className={inputClass}
+                    value={volume.emailsPerAccount}
+                    onChange={(e) =>
+                      updateVolume(
+                        "emailsPerAccount",
+                        Math.max(0, Number(e.target.value)),
+                      )
+                    }
+                  />
+                </Field>
+              ) : null}
+              {channels.whatsapp ? (
+                <Field label="WhatsApp messages per account / month">
+                  <input
+                    type="number"
+                    min={0}
+                    className={inputClass}
+                    value={volume.whatsappPerAccount}
+                    onChange={(e) =>
+                      updateVolume(
+                        "whatsappPerAccount",
+                        Math.max(0, Number(e.target.value)),
+                      )
+                    }
+                  />
+                </Field>
+              ) : null}
+              {channels.linkedin ? (
+                <Field
+                  label="LinkedIn touch points / account"
+                  hint={`e.g. 2 messages per account · ${LINKEDIN_DM_DAILY_CAP}/sender/day`}
+                >
+                  <input
+                    type="number"
+                    min={0}
+                    className={inputClass}
+                    value={volume.linkedinTouchPointsPerAccount}
+                    onChange={(e) =>
+                      updateVolume(
+                        "linkedinTouchPointsPerAccount",
+                        Math.max(0, Number(e.target.value)),
+                      )
+                    }
+                  />
+                </Field>
+              ) : null}
             </div>
 
-            <dl className="mt-6 grid grid-cols-2 gap-3 rounded-xl bg-zinc-50 p-4 text-sm dark:bg-zinc-900/60">
+            <dl className="mt-6 grid grid-cols-2 gap-3 rounded-xl bg-clarity-panel p-4 text-sm">
               <div>
-                <dt className="text-zinc-500">Total accounts</dt>
+                <dt className="text-clarity-muted">Total accounts</dt>
                 <dd className="font-semibold tabular-nums">
                   {derivedPreview.totalAccounts.toLocaleString()}
                 </dd>
               </div>
+              {channels.email ? (
               <div>
-                <dt className="text-zinc-500">Emails / month</dt>
+                <dt className="text-clarity-muted">Emails / month</dt>
                 <dd className="font-semibold tabular-nums">
                   {derivedPreview.totalEmailsMonthly.toLocaleString()}
                 </dd>
               </div>
+              ) : null}
+              {channels.whatsapp ? (
               <div>
-                <dt className="text-zinc-500">WhatsApp / month</dt>
+                <dt className="text-clarity-muted">WhatsApp / month</dt>
                 <dd className="font-semibold tabular-nums">
                   {derivedPreview.totalWhatsappMonthly.toLocaleString()}
                 </dd>
               </div>
+              ) : null}
               <div>
-                <dt className="text-zinc-500">AI Ark credits (campaign)</dt>
+                <dt className="text-clarity-muted">AI Ark credits</dt>
                 <dd className="font-semibold tabular-nums">
                   {derivedPreview.aiArkCreditsPerCampaign.toLocaleString()}
+                  <span className="ml-1 text-xs font-normal text-clarity-muted">
+                    (0.5/account)
+                  </span>
                 </dd>
               </div>
               <div>
-                <dt className="text-zinc-500">Inboxkit mailboxes (auto)</dt>
+                <dt className="text-clarity-muted">Freckle credits</dt>
+                <dd className="font-semibold tabular-nums">
+                  {derivedPreview.freckleCreditsPerCampaign.toLocaleString()}
+                  <span className="ml-1 text-xs font-normal text-clarity-muted">
+                    (1/account)
+                  </span>
+                </dd>
+              </div>
+              {channels.linkedin ? (
+              <div>
+                <dt className="text-clarity-muted">LinkedIn messages / month</dt>
+                <dd className="font-semibold tabular-nums">
+                  {derivedPreview.totalLinkedinMessagesMonthly.toLocaleString()}
+                </dd>
+              </div>
+              ) : null}
+              {channels.email ? (
+              <>
+              <div>
+                <dt className="text-clarity-muted">Inboxkit mailboxes (auto)</dt>
                 <dd className="font-semibold tabular-nums">
                   {derivedPreview.inboxkitMailboxesNeeded}
                 </dd>
               </div>
               <div>
-                <dt className="text-zinc-500">LinkedIn senders (est.)</dt>
+                <dt className="text-clarity-muted">Inboxkit $/account (est.)</dt>
+                <dd className="font-semibold tabular-nums">
+                  {formatUsd(
+                    derivedPreview.inboxkitDomainCostPerAccount +
+                      derivedPreview.inboxkitInboxCostPerAccount,
+                  )}
+                </dd>
+              </div>
+              </>
+              ) : null}
+              {channels.linkedin ? (
+              <div>
+                <dt className="text-clarity-muted">LinkedIn senders (est.)</dt>
                 <dd className="font-semibold tabular-nums">
                   {derivedPreview.heyreachSendersNeeded}
-                  <span className="ml-1 text-xs font-normal text-zinc-500">
-                    (DMs: {derivedPreview.heyreachSendersForDms}, conn:{" "}
-                    {derivedPreview.heyreachSendersForConnections})
-                  </span>
                 </dd>
               </div>
-              <div>
-                <dt className="text-zinc-500">LinkedIn DMs / month</dt>
-                <dd className="font-semibold tabular-nums">
-                  {derivedPreview.linkedinDmsPerMonth.toLocaleString()}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-zinc-500">Connections / month</dt>
-                <dd className="font-semibold tabular-nums">
-                  {derivedPreview.linkedinConnectionRequestsPerMonth.toLocaleString()}
-                </dd>
-              </div>
+              ) : null}
             </dl>
 
             <div className="mt-5 flex flex-wrap gap-3">
@@ -359,6 +418,7 @@ export function OutreachCalculator() {
                   <option value="annual">Annual (discounted rates)</option>
                 </select>
               </Field>
+              {channels.whatsapp ? (
               <Field label="INR → USD rate" hint="For Interakt (₹ plans)">
                 <input
                   type="number"
@@ -369,12 +429,13 @@ export function OutreachCalculator() {
                   onChange={(e) => setInrToUsd(Number(e.target.value))}
                 />
               </Field>
+              ) : null}
             </div>
 
             <button
               type="button"
               onClick={autoSuggestPlans}
-              className="mt-5 w-full rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+              className="mt-5 w-full rounded-lg bg-clarity-ink px-4 py-2.5 text-sm font-medium text-clarity-bg transition hover:bg-clarity-text"
             >
               Auto-suggest plans from volume
             </button>
@@ -382,6 +443,7 @@ export function OutreachCalculator() {
         </section>
 
         <section className="space-y-4 lg:col-span-3">
+          {channels.email ? (
           <ToolCard
             name="Apollo.io"
             enabled={tools.apollo}
@@ -412,154 +474,132 @@ export function OutreachCalculator() {
               </Field>
             </div>
           </ToolCard>
+          ) : null}
 
           <ToolCard
             name="AI Ark"
             enabled={tools.aiArk}
             onToggle={() => toggleTool("aiArk")}
-            description="Credit-volume tiers; alternative to Apollo."
+            description={`$${USAGE_PRICING.aiArk.pricePerMonth}/mo per ${USAGE_PRICING.aiArk.creditsPerMonth.toLocaleString()} credits · ${USAGE_PRICING.aiArk.creditsPerAccount} credit per account saved.`}
           >
-            <Field label="Tier">
-              <select
-                className={selectClass}
-                value={aiArkTier}
-                onChange={(e) => setAiArkTier(e.target.value as AiArkTier)}
-              >
-                <option value="starter">Starter — $49/mo (30K credits, 3 seats)</option>
-                <option value="builder-60k">Builder 60K — $99/mo</option>
-                <option value="builder-120k">Builder 120K — $149/mo</option>
-                <option value="builder-300k">Builder 300K — $249/mo</option>
-                <option value="scale-450k">Scale 450K+ — $399/mo</option>
-              </select>
-            </Field>
-            <AiArkCostCreditsPanel
-              tier={aiArkTier}
-              billing={billing}
-              campaignCredits={derived.aiArkCreditsPerCampaign}
+            <UsageCostPanel
+              credits={derived.aiArkCreditsPerCampaign}
+              creditsLabel="AI Ark credits"
+              creditsHint={`${USAGE_PRICING.aiArk.creditsPerAccount} credit per account`}
+              cost={calculateAiArkUsageCost(derived.totalAccounts)}
+              rateLabel={`$${USAGE_PRICING.aiArk.pricePerMonth} / ${USAGE_PRICING.aiArk.creditsPerMonth.toLocaleString()} credits`}
             />
           </ToolCard>
 
           <ToolCard
+            name="Freckle"
+            enabled={tools.freckle}
+            onToggle={() => toggleTool("freckle")}
+            description={`AI enrichment · $${USAGE_PRICING.freckle.pricePerMonth}/mo per ${USAGE_PRICING.freckle.creditsPerMonth.toLocaleString()} credits · ${USAGE_PRICING.freckle.creditsPerAccount} credit per enrichment.`}
+          >
+            <UsageCostPanel
+              credits={derived.freckleCreditsPerCampaign}
+              creditsLabel="Freckle credits"
+              creditsHint={`${USAGE_PRICING.freckle.creditsPerAccount} credit per account`}
+              cost={calculateFreckleUsageCost(derived.totalAccounts)}
+              rateLabel={`$${USAGE_PRICING.freckle.pricePerMonth} / ${USAGE_PRICING.freckle.creditsPerMonth.toLocaleString()} credits`}
+            />
+          </ToolCard>
+
+          {channels.email ? (
+          <ToolCard
             name="Inboxkit"
             enabled={tools.inboxkit}
             onToggle={() => toggleTool("inboxkit")}
-            description="Mailboxes auto-sized from total email volume."
+            description={`$${USAGE_PRICING.inboxkit.planPrice}/mo · ${USAGE_PRICING.inboxkit.inboxesIncluded} inboxes · ${USAGE_PRICING.inboxkit.emailsPerInboxPerDay} emails/inbox/day · domain $${USAGE_PRICING.inboxkit.domainCostYearly}/yr.`}
           >
-            <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-zinc-600 dark:text-zinc-400">Mailboxes (auto)</span>
-                <span className="text-lg font-semibold tabular-nums">
-                  {derived.inboxkitMailboxesNeeded}
-                </span>
-              </div>
-              <p className="mt-2 text-xs text-zinc-500">
-                {derived.totalEmailsMonthly.toLocaleString()} emails ÷{" "}
-                {EMAILS_PER_MAILBOX_PER_DAY}/inbox · {derived.inboxkitDomainsNeeded}{" "}
-                domain(s)
-              </p>
-            </div>
-            <Field label="Price per mailbox / month">
-              <input
-                type="number"
-                step={0.01}
-                min={0}
-                className={inputClass}
-                value={inboxkitPricePerMailbox}
-                onChange={(e) => setInboxkitPricePerMailbox(Number(e.target.value))}
-              />
-            </Field>
+            <UsageCostPanel
+              credits={derived.totalEmailsMonthly}
+              creditsLabel="Emails / month"
+              creditsHint={`${volume.emailsPerAccount} touch pt(s) × ${derived.totalAccounts.toLocaleString()} accounts`}
+              cost={
+                calculateInboxkitUsageCost(
+                  derived.totalAccounts,
+                  volume.emailsPerAccount,
+                ).total
+              }
+              rateLabel={`Domain ${formatUsd(derived.inboxkitDomainCostPerAccount)}/acct · Inbox ${formatUsd(derived.inboxkitInboxCostPerAccount)}/acct`}
+            />
           </ToolCard>
+          ) : null}
 
+          {channels.email ? (
           <ToolCard
             name="Smartlead"
             enabled={tools.smartlead}
             onToggle={() => toggleTool("smartlead")}
-            description="Active leads + send limits; unlimited mailboxes on all plans."
+            description={`$${USAGE_PRICING.smartlead.pricePerMonth}/mo per ${USAGE_PRICING.smartlead.sendsPerMonth.toLocaleString()} sends.`}
           >
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Plan">
-                <select
-                  className={selectClass}
-                  value={smartleadPlan}
-                  onChange={(e) => setSmartleadPlan(e.target.value as SmartleadPlan)}
-                >
-                  <option value="basic">Basic — $39 (2K leads, 6K sends)</option>
-                  <option value="pro">Pro — $79 (30K leads, unlimited sends)</option>
-                  <option value="custom">Custom — $94+ (unlimited)</option>
-                </select>
-              </Field>
-              <Field label="AI Warmup Pool (+$59/mo)">
-                <select
-                  className={selectClass}
-                  value={smartleadWarmup ? "yes" : "no"}
-                  onChange={(e) => setSmartleadWarmup(e.target.value === "yes")}
-                >
-                  <option value="yes">Include warmup add-on</option>
-                  <option value="no">Exclude warmup</option>
-                </select>
-              </Field>
-            </div>
+            <UsageCostPanel
+              credits={derived.totalEmailsMonthly}
+              creditsLabel="Sends / month"
+              creditsHint={`${volume.emailsPerAccount} touch pt(s) × ${derived.totalAccounts.toLocaleString()} accounts`}
+              cost={calculateSmartleadUsageCost(
+                derived.totalAccounts,
+                volume.emailsPerAccount,
+              )}
+              rateLabel={`$${USAGE_PRICING.smartlead.pricePerMonth} / ${USAGE_PRICING.smartlead.sendsPerMonth.toLocaleString()} sends`}
+            />
+            <Field label="AI Warmup Pool (+$59/mo)">
+              <select
+                className={selectClass}
+                value={smartleadWarmup ? "yes" : "no"}
+                onChange={(e) => setSmartleadWarmup(e.target.value === "yes")}
+              >
+                <option value="yes">Include warmup add-on</option>
+                <option value="no">Exclude warmup</option>
+              </select>
+            </Field>
           </ToolCard>
+          ) : null}
 
+          {channels.linkedin ? (
           <ToolCard
             name="HeyReach"
             enabled={tools.heyreach}
             onToggle={() => toggleTool("heyreach")}
-            description={`Per sender: ${LINKEDIN_DM_DAILY_CAP} DMs/day · ${LINKEDIN_CONNECTION_DAILY_CAP} connections/day.`}
+            description={`$${USAGE_PRICING.heyreach.pricePerSender}/sender · ${USAGE_PRICING.heyreach.messagesPerSenderPerDay} messages/day · ${volume.linkedinTouchPointsPerAccount} touch pt(s)/account.`}
           >
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Plan">
-                <select
-                  className={selectClass}
-                  value={heyreachPlan}
-                  onChange={(e) => setHeyreachPlan(e.target.value as HeyReachPlan)}
-                >
-                  <option value="growth-1">Growth — 1 sender ($79/mo)</option>
-                  <option value="growth-5">Growth — 5 senders ($395/mo)</option>
-                  <option value="agency">Agency — up to 50 ($999/mo)</option>
-                  <option value="unlimited">Unlimited — up to 500 ($1,999/mo)</option>
-                </select>
-              </Field>
-              <Field
-                label="Senders (override)"
-                hint={`Auto: ${derived.heyreachSendersNeeded}`}
+            <UsageCostPanel
+              credits={derived.totalLinkedinMessagesMonthly}
+              creditsLabel="LinkedIn messages / month"
+              creditsHint={`${volume.linkedinTouchPointsPerAccount} touch pt(s) × ${derived.totalAccounts.toLocaleString()} accounts`}
+              cost={calculateHeyReachUsageCost(
+                derived.totalAccounts,
+                volume.linkedinTouchPointsPerAccount,
+              )}
+              rateLabel={`$${USAGE_PRICING.heyreach.pricePerSender}/sender · ${Math.round((USAGE_PRICING.heyreach.messagesPerSenderPerDay * 30) / volume.linkedinTouchPointsPerAccount || 0)} accounts/sender`}
+            />
+            <Field label="Residential proxies">
+              <select
+                className={selectClass}
+                value={heyreachProxies ? "yes" : "no"}
+                onChange={(e) => setHeyreachProxies(e.target.value === "yes")}
               >
+                <option value="no">Exclude proxy costs</option>
+                <option value="yes">Include ($15–25/account — default $20)</option>
+              </select>
+            </Field>
+            {heyreachProxies ? (
+              <Field label="Proxy cost per sender / month">
                 <input
                   type="number"
                   min={0}
-                  placeholder="Auto"
                   className={inputClass}
-                  value={heyreachSendersOverride ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setHeyreachSendersOverride(v === "" ? null : Math.max(0, Number(v)));
-                  }}
+                  value={proxyCostPerSender}
+                  onChange={(e) => setProxyCostPerSender(Number(e.target.value))}
                 />
               </Field>
-              <Field label="Residential proxies">
-                <select
-                  className={selectClass}
-                  value={heyreachProxies ? "yes" : "no"}
-                  onChange={(e) => setHeyreachProxies(e.target.value === "yes")}
-                >
-                  <option value="no">Exclude proxy costs</option>
-                  <option value="yes">Include ($15–25/account — default $20)</option>
-                </select>
-              </Field>
-              {heyreachProxies ? (
-                <Field label="Proxy cost per sender / month">
-                  <input
-                    type="number"
-                    min={0}
-                    className={inputClass}
-                    value={proxyCostPerSender}
-                    onChange={(e) => setProxyCostPerSender(Number(e.target.value))}
-                  />
-                </Field>
-              ) : null}
-            </div>
+            ) : null}
           </ToolCard>
+          ) : null}
 
+          {channels.whatsapp ? (
           <ToolCard
             name="Interakt (WhatsApp)"
             enabled={tools.interakt}
@@ -594,21 +634,22 @@ export function OutreachCalculator() {
               </Field>
             </div>
           </ToolCard>
+          ) : null}
         </section>
       </div>
 
-      <section className="mt-10 rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="flex flex-col gap-4 border-b border-zinc-200 px-6 py-5 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800">
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+      <section className="mt-10 rounded-2xl border border-clarity-border/60 bg-clarity-surface shadow-sm">
+        <div className="flex flex-col gap-4 border-b border-clarity-border/40 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-lg font-semibold text-clarity-ink">
             Cost breakdown
           </h2>
           <div className="text-right">
-            <p className="text-sm text-zinc-500">Estimated monthly total (USD)</p>
-            <p className="text-3xl font-bold tabular-nums text-blue-600 dark:text-blue-400">
+            <p className="text-sm text-clarity-muted">Estimated monthly total (USD)</p>
+            <p className="text-3xl font-bold tabular-nums text-clarity-gold">
               {formatUsd(totalMonthlyUsd)}
             </p>
             {annualTotal !== null ? (
-              <p className="text-sm text-zinc-500">
+              <p className="text-sm text-clarity-muted">
                 ~{formatUsd(annualTotal)} if billed annually (12× monthly equivalent)
               </p>
             ) : null}
@@ -626,13 +667,13 @@ export function OutreachCalculator() {
         ) : null}
 
         {lineItems.length === 0 ? (
-          <p className="px-6 py-8 text-center text-zinc-500">
-            Enable at least one tool to see costs.
+          <p className="px-6 py-8 text-center text-clarity-muted">
+            Enable at least one channel and tool to see costs.
           </p>
         ) : (
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="border-b border-zinc-100 text-zinc-500 dark:border-zinc-800">
+              <tr className="border-b border-clarity-border/30 text-clarity-muted">
                 <th className="px-6 py-3 font-medium">Tool</th>
                 <th className="px-6 py-3 font-medium">Line item</th>
                 <th className="px-6 py-3 font-medium">Credits / detail</th>
@@ -643,18 +684,18 @@ export function OutreachCalculator() {
               {lineItems.map((item, i) => (
                 <tr
                   key={`${item.tool}-${item.label}-${i}`}
-                  className="border-b border-zinc-50 last:border-0 dark:border-zinc-900"
+                  className="border-b border-clarity-border/20 last:border-0"
                 >
-                  <td className="px-6 py-3 font-medium text-zinc-900 dark:text-zinc-100">
+                  <td className="px-6 py-3 font-medium text-clarity-ink">
                     {item.tool}
                   </td>
-                  <td className="px-6 py-3 text-zinc-700 dark:text-zinc-300">
+                  <td className="px-6 py-3 text-clarity-text">
                     {item.label}
                   </td>
-                  <td className="px-6 py-3 text-zinc-500">
+                  <td className="px-6 py-3 text-clarity-muted">
                     {item.creditsUsed != null ? (
                       <span>
-                        <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                        <span className="font-medium text-clarity-text">
                           {item.creditsUsed.toLocaleString()}
                         </span>
                         {" / "}
@@ -672,11 +713,11 @@ export function OutreachCalculator() {
               ))}
             </tbody>
             <tfoot>
-              <tr className="bg-zinc-50 font-semibold dark:bg-zinc-900/60">
-                <td colSpan={3} className="px-6 py-4 text-zinc-900 dark:text-zinc-50">
+              <tr className="bg-clarity-panel font-semibold">
+                <td colSpan={3} className="px-6 py-4 text-clarity-ink">
                   Total
                 </td>
-                <td className="px-6 py-4 text-right tabular-nums text-blue-600 dark:text-blue-400">
+                <td className="px-6 py-4 text-right tabular-nums text-clarity-gold">
                   {formatUsd(totalMonthlyUsd)}
                 </td>
               </tr>
@@ -685,7 +726,7 @@ export function OutreachCalculator() {
         )}
       </section>
 
-      <p className="mt-6 text-center text-xs text-zinc-400">
+      <p className="mt-6 text-center text-xs text-clarity-steel">
         Estimates based on 2026 public pricing. AI Ark Builder tiers use indicative
         list prices where not published. Verify with vendors before budgeting.
       </p>
@@ -693,54 +734,39 @@ export function OutreachCalculator() {
   );
 }
 
-function AiArkCostCreditsPanel({
-  tier,
-  billing,
-  campaignCredits,
+function UsageCostPanel({
+  credits,
+  creditsLabel,
+  creditsHint,
+  cost,
+  rateLabel,
 }: {
-  tier: AiArkTier;
-  billing: BillingCycle;
-  campaignCredits: number;
+  credits: number;
+  creditsLabel: string;
+  creditsHint: string;
+  cost: number;
+  rateLabel: string;
 }) {
-  const tierInfo = AI_ARK_MONTHLY[tier];
-  const monthlyPrice =
-    billing === "annual" ? tierInfo.price * 0.8 : tierInfo.price;
-  const overPlan = campaignCredits > tierInfo.credits;
-
   return (
-    <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-blue-100 bg-blue-50/60 p-4 dark:border-blue-900/40 dark:bg-blue-950/30">
+    <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-clarity-accent-active/40 bg-clarity-accent-active/10 p-4">
       <div>
-        <p className="text-xs font-medium uppercase tracking-wide text-blue-700 dark:text-blue-300">
-          Campaign credits
+        <p className="text-xs font-medium uppercase tracking-wide text-clarity-muted">
+          {creditsLabel}
         </p>
-        <p className="mt-1 text-2xl font-bold tabular-nums text-zinc-900 dark:text-zinc-50">
-          {campaignCredits.toLocaleString()}
+        <p className="mt-1 text-2xl font-bold tabular-nums text-clarity-ink">
+          {credits.toLocaleString()}
         </p>
-        <p className="mt-0.5 text-xs text-zinc-500">1 credit per email</p>
+        <p className="mt-0.5 text-xs text-clarity-muted">{creditsHint}</p>
       </div>
       <div>
-        <p className="text-xs font-medium uppercase tracking-wide text-blue-700 dark:text-blue-300">
-          Plan cost / month
+        <p className="text-xs font-medium uppercase tracking-wide text-clarity-muted">
+          Est. cost / month
         </p>
-        <p className="mt-1 text-2xl font-bold tabular-nums text-zinc-900 dark:text-zinc-50">
-          {formatUsd(monthlyPrice)}
+        <p className="mt-1 text-2xl font-bold tabular-nums text-clarity-ink">
+          {formatUsd(cost)}
         </p>
-        <p className="mt-0.5 text-xs text-zinc-500">
-          Includes {tierInfo.credits.toLocaleString()} credits/mo
-        </p>
+        <p className="mt-0.5 text-xs text-clarity-muted">{rateLabel}</p>
       </div>
-      {overPlan ? (
-        <p className="col-span-2 text-xs text-amber-700 dark:text-amber-300">
-          Campaign exceeds plan by{" "}
-          {(campaignCredits - tierInfo.credits).toLocaleString()} credits — consider
-          a higher tier.
-        </p>
-      ) : (
-        <p className="col-span-2 text-xs text-emerald-700 dark:text-emerald-300">
-          {(tierInfo.credits - campaignCredits).toLocaleString()} credits remaining
-          in plan this month (if single campaign).
-        </p>
-      )}
     </div>
   );
 }
@@ -762,14 +788,14 @@ function ToolCard({
     <div
       className={`rounded-2xl border p-5 transition ${
         enabled
-          ? "border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
-          : "border-zinc-100 bg-zinc-50 opacity-60 dark:border-zinc-900 dark:bg-zinc-950/50"
+          ? "border-clarity-border/60 bg-clarity-surface shadow-sm"
+          : "border-clarity-border/30 bg-clarity-panel/60 opacity-60"
       }`}
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="font-semibold text-zinc-900 dark:text-zinc-50">{name}</h3>
-          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+          <h3 className="font-semibold text-clarity-ink">{name}</h3>
+          <p className="mt-0.5 text-xs text-clarity-muted">
             {description}
           </p>
         </div>
@@ -778,8 +804,8 @@ function ToolCard({
           onClick={onToggle}
           className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition ${
             enabled
-              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
-              : "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+              ? "bg-clarity-accent-active/30 text-clarity-ink"
+              : "bg-clarity-border/30 text-clarity-muted"
           }`}
         >
           {enabled ? "Included" : "Excluded"}

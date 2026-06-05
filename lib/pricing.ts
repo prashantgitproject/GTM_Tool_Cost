@@ -1,22 +1,30 @@
+import type { ChannelToggles } from "./clarity-theme";
+
 /** USD per INR (approximate; override in UI if needed) */
 export const DEFAULT_INR_TO_USD = 1 / 83;
+
+export type { ChannelToggles };
 
 export type BillingCycle = "monthly" | "annual";
 
 export type VolumeInputs = {
   prospects: number;
   accountsPerProspect: number;
+  /** Email touch points per account per month */
   emailsPerAccount: number;
   whatsappPerAccount: number;
-  /** Total LinkedIn DMs across all accounts per month */
-  linkedinDmsPerMonth: number;
-  /** Total connection requests across all accounts per month */
-  linkedinConnectionRequestsPerMonth: number;
+  /** LinkedIn touch points per account per month (messages) */
+  linkedinTouchPointsPerAccount: number;
+  /** @deprecated Use linkedinTouchPointsPerAccount; kept for migration */
+  linkedinDmsPerMonth?: number;
+  /** @deprecated Use linkedinTouchPointsPerAccount; kept for migration */
+  linkedinConnectionRequestsPerMonth?: number;
 };
 
 export type ToolToggles = {
   apollo: boolean;
   aiArk: boolean;
+  freckle: boolean;
   inboxkit: boolean;
   smartlead: boolean;
   heyreach: boolean;
@@ -42,6 +50,7 @@ export type InteraktMessageType =
 export type CalculatorConfig = {
   volume: VolumeInputs;
   tools: ToolToggles;
+  channels: ChannelToggles;
   billing: BillingCycle;
   inrToUsd: number;
   apollo: {
@@ -83,7 +92,9 @@ export type DerivedVolume = {
   totalAccounts: number;
   totalEmailsMonthly: number;
   totalWhatsappMonthly: number;
+  totalLinkedinMessagesMonthly: number;
   aiArkCreditsPerCampaign: number;
+  freckleCreditsPerCampaign: number;
   linkedinDmsPerMonth: number;
   linkedinConnectionRequestsPerMonth: number;
   heyreachSendersForDms: number;
@@ -92,23 +103,61 @@ export type DerivedVolume = {
   inboxkitMailboxesNeeded: number;
   inboxkitDomainsNeeded: number;
   apolloCreditsNeeded: number;
+  /** Per-account usage cost (domain portion) */
+  inboxkitDomainCostPerAccount: number;
+  /** Per-account usage cost (inbox portion) */
+  inboxkitInboxCostPerAccount: number;
 };
 
-/** Safe cold-email capacity per Inboxkit mailbox */
-export const EMAILS_PER_MAILBOX_PER_DAY = 20;
-/** Max DMs or connection requests entered per month (campaign total) */
-export const LINKEDIN_MONTHLY_INPUT_CAP = 6000;
-/** LinkedIn platform max DMs per sender profile per day */
-export const LINKEDIN_DM_DAILY_CAP = 200;
+const DAYS_PER_MONTH = 30;
+
+/** Usage-based pricing constants */
+export const USAGE_PRICING = {
+  aiArk: {
+    pricePerMonth: 49,
+    creditsPerMonth: 5_000,
+    creditsPerAccount: 0.5,
+  },
+  freckle: {
+    pricePerMonth: 189,
+    creditsPerMonth: 5_000,
+    creditsPerAccount: 1,
+  },
+  inboxkit: {
+    planPrice: 99,
+    inboxesIncluded: 30,
+    emailsPerInboxPerDay: 25,
+    domainCostYearly: 14,
+    emailsPerDomainPerDay: 100,
+    inboxesPerDomain: 4,
+  },
+  smartlead: {
+    pricePerMonth: 32,
+    sendsPerMonth: 6_000,
+  },
+  heyreach: {
+    pricePerSender: 79,
+    messagesPerSenderPerDay: 200,
+  },
+} as const;
+
+/** Safe cold-email capacity per Inboxkit mailbox (legacy display) */
+export const EMAILS_PER_MAILBOX_PER_DAY =
+  USAGE_PRICING.inboxkit.emailsPerInboxPerDay;
+/** Max LinkedIn messages per month per sender profile */
+export const LINKEDIN_MONTHLY_INPUT_CAP =
+  USAGE_PRICING.heyreach.messagesPerSenderPerDay * DAYS_PER_MONTH;
+/** LinkedIn platform max messages per sender profile per day */
+export const LINKEDIN_DM_DAILY_CAP =
+  USAGE_PRICING.heyreach.messagesPerSenderPerDay;
 /** LinkedIn safe max connection requests per sender profile per day */
 export const LINKEDIN_CONNECTION_DAILY_CAP = 20;
-const DAYS_PER_MONTH = 30;
 /** Per-sender monthly capacity derived from daily limits */
 export const LINKEDIN_DM_MONTHLY_PER_SENDER =
   LINKEDIN_DM_DAILY_CAP * DAYS_PER_MONTH;
 export const LINKEDIN_CONNECTION_MONTHLY_PER_SENDER =
   LINKEDIN_CONNECTION_DAILY_CAP * DAYS_PER_MONTH;
-const MAILBOXES_PER_DOMAIN = 5;
+const MAILBOXES_PER_DOMAIN = USAGE_PRICING.inboxkit.inboxesPerDomain;
 
 const APOLLO_MONTHLY: Record<ApolloPlan, number> = {
   free: 0,
@@ -170,17 +219,99 @@ const INTERAKT_INR_PER_MESSAGE: Record<InteraktMessageType, number> = {
   service: 0,
 };
 
-export function capLinkedinMonthlyVolume(value: number): number {
-  return Math.min(
-    LINKEDIN_MONTHLY_INPUT_CAP,
-    Math.max(0, value),
-  );
+/** AI Ark: (accounts × 0.5) / 5000 × $49 */
+export function calculateAiArkUsageCost(accounts: number): number {
+  const { creditsPerAccount, creditsPerMonth, pricePerMonth } =
+    USAGE_PRICING.aiArk;
+  return ((accounts * creditsPerAccount) / creditsPerMonth) * pricePerMonth;
 }
 
-/** Mailboxes from total email volume: ceil(total emails ÷ 20 safe emails/inbox). */
+/** Freckle: (accounts × 1) / 5000 × $189 */
+export function calculateFreckleUsageCost(accounts: number): number {
+  const { creditsPerAccount, creditsPerMonth, pricePerMonth } =
+    USAGE_PRICING.freckle;
+  return ((accounts * creditsPerAccount) / creditsPerMonth) * pricePerMonth;
+}
+
+/**
+ * Domain: ($14/12)/mo × accounts / accountsPerDomain
+ * At 4 email touch points: 100 emails/domain/day × 30 days ÷ 4 = 750 accounts/domain
+ * e.g. 100 accounts → (14/12) × 100/750 ≈ $0.16/mo
+ */
+export function calculateInboxkitDomainCost(
+  accounts: number,
+  emailTouchPoints: number,
+): number {
+  if (emailTouchPoints <= 0 || accounts <= 0) return 0;
+  const { domainCostYearly, emailsPerDomainPerDay } = USAGE_PRICING.inboxkit;
+  const domainCostMonthly = domainCostYearly / 12;
+  const emailsPerDomainPerMonth = emailsPerDomainPerDay * DAYS_PER_MONTH;
+  const accountsPerDomain = emailsPerDomainPerMonth / emailTouchPoints;
+  return domainCostMonthly * (accounts / accountsPerDomain);
+}
+
+export function calculateInboxkitDomainCostPerAccount(
+  emailTouchPoints: number,
+): number {
+  return calculateInboxkitDomainCost(1, emailTouchPoints);
+}
+
+/** Inbox: $99/30 inboxes, 25 emails/inbox/day → accounts covered per inbox */
+export function calculateInboxkitInboxCostPerAccount(
+  emailTouchPoints: number,
+): number {
+  if (emailTouchPoints <= 0) return 0;
+  const { planPrice, inboxesIncluded, emailsPerInboxPerDay } =
+    USAGE_PRICING.inboxkit;
+  const inboxCostMonthly = planPrice / inboxesIncluded;
+  const emailsPerInboxPerMonth = emailsPerInboxPerDay * DAYS_PER_MONTH;
+  const accountsPerInbox = emailsPerInboxPerMonth / emailTouchPoints;
+  return inboxCostMonthly / accountsPerInbox;
+}
+
+export function calculateInboxkitUsageCost(
+  accounts: number,
+  emailTouchPoints: number,
+): { domain: number; inbox: number; total: number } {
+  const domain = calculateInboxkitDomainCost(accounts, emailTouchPoints);
+  const inboxPerAccount = calculateInboxkitInboxCostPerAccount(emailTouchPoints);
+  const inbox = accounts * inboxPerAccount;
+  return { domain, inbox, total: domain + inbox };
+}
+
+/** Smartlead: $32 / 6000 sends × total emails */
+export function calculateSmartleadUsageCost(
+  accounts: number,
+  emailTouchPoints: number,
+): number {
+  if (emailTouchPoints <= 0) return 0;
+  const { pricePerMonth, sendsPerMonth } = USAGE_PRICING.smartlead;
+  const totalEmails = accounts * emailTouchPoints;
+  return (pricePerMonth / sendsPerMonth) * totalEmails;
+}
+
+/** HeyReach: $79/sender, 200 msgs/day → accounts covered per sender */
+export function calculateHeyReachUsageCost(
+  accounts: number,
+  linkedinTouchPoints: number,
+): number {
+  if (linkedinTouchPoints <= 0) return 0;
+  const { pricePerSender, messagesPerSenderPerDay } = USAGE_PRICING.heyreach;
+  const messagesPerSenderPerMonth = messagesPerSenderPerDay * DAYS_PER_MONTH;
+  const accountsPerSender = messagesPerSenderPerMonth / linkedinTouchPoints;
+  return (pricePerSender / accountsPerSender) * accounts;
+}
+
+export function capLinkedinMonthlyVolume(value: number): number {
+  return Math.min(LINKEDIN_MONTHLY_INPUT_CAP, Math.max(0, value));
+}
+
+/** Mailboxes from total email volume. */
 export function computeInboxkitMailboxes(totalEmailsMonthly: number): number {
   if (totalEmailsMonthly <= 0) return 0;
-  return Math.ceil(totalEmailsMonthly / EMAILS_PER_MAILBOX_PER_DAY);
+  const emailsPerInboxPerMonth =
+    USAGE_PRICING.inboxkit.emailsPerInboxPerDay * DAYS_PER_MONTH;
+  return Math.ceil(totalEmailsMonthly / emailsPerInboxPerMonth);
 }
 
 export function deriveVolume(volume: VolumeInputs): DerivedVolume {
@@ -189,24 +320,27 @@ export function deriveVolume(volume: VolumeInputs): DerivedVolume {
     accountsPerProspect,
     emailsPerAccount,
     whatsappPerAccount,
-    linkedinDmsPerMonth,
-    linkedinConnectionRequestsPerMonth,
+    linkedinTouchPointsPerAccount,
   } = volume;
 
   const totalAccounts = prospects * accountsPerProspect;
   const totalEmailsMonthly = totalAccounts * emailsPerAccount;
   const totalWhatsappMonthly = totalAccounts * whatsappPerAccount;
-  const aiArkCreditsPerCampaign = totalEmailsMonthly;
+  const totalLinkedinMessagesMonthly =
+    totalAccounts * linkedinTouchPointsPerAccount;
+
+  const aiArkCreditsPerCampaign =
+    totalAccounts * USAGE_PRICING.aiArk.creditsPerAccount;
+  const freckleCreditsPerCampaign =
+    totalAccounts * USAGE_PRICING.freckle.creditsPerAccount;
 
   const linkedinDmsPerMonthCapped = capLinkedinMonthlyVolume(
-    linkedinDmsPerMonth,
+    totalLinkedinMessagesMonthly,
   );
-  const linkedinConnectionRequestsPerMonthCapped = capLinkedinMonthlyVolume(
-    linkedinConnectionRequestsPerMonth,
-  );
+  const linkedinConnectionRequestsPerMonthCapped = 0;
 
   const heyreachSendersForDms =
-    linkedinDmsPerMonthCapped > 0
+    linkedinTouchPointsPerAccount > 0 && totalAccounts > 0
       ? Math.max(
           1,
           Math.ceil(
@@ -214,21 +348,9 @@ export function deriveVolume(volume: VolumeInputs): DerivedVolume {
           ),
         )
       : 0;
-  const heyreachSendersForConnections =
-    linkedinConnectionRequestsPerMonthCapped > 0
-      ? Math.max(
-          1,
-          Math.ceil(
-            linkedinConnectionRequestsPerMonthCapped /
-              LINKEDIN_CONNECTION_MONTHLY_PER_SENDER,
-          ),
-        )
-      : 0;
+  const heyreachSendersForConnections = 0;
 
-  const heyreachSendersNeeded = Math.max(
-    heyreachSendersForDms,
-    heyreachSendersForConnections,
-  );
+  const heyreachSendersNeeded = heyreachSendersForDms;
 
   const inboxkitMailboxesNeeded = computeInboxkitMailboxes(totalEmailsMonthly);
   const inboxkitDomainsNeeded =
@@ -238,11 +360,18 @@ export function deriveVolume(volume: VolumeInputs): DerivedVolume {
 
   const apolloCreditsNeeded = totalEmailsMonthly;
 
+  const inboxkitDomainCostPerAccount =
+    calculateInboxkitDomainCostPerAccount(emailsPerAccount);
+  const inboxkitInboxCostPerAccount =
+    calculateInboxkitInboxCostPerAccount(emailsPerAccount);
+
   return {
     totalAccounts,
     totalEmailsMonthly,
     totalWhatsappMonthly,
+    totalLinkedinMessagesMonthly,
     aiArkCreditsPerCampaign,
+    freckleCreditsPerCampaign,
     linkedinDmsPerMonth: linkedinDmsPerMonthCapped,
     linkedinConnectionRequestsPerMonth:
       linkedinConnectionRequestsPerMonthCapped,
@@ -252,6 +381,8 @@ export function deriveVolume(volume: VolumeInputs): DerivedVolume {
     inboxkitMailboxesNeeded,
     inboxkitDomainsNeeded,
     apolloCreditsNeeded,
+    inboxkitDomainCostPerAccount,
+    inboxkitInboxCostPerAccount,
   };
 }
 
@@ -290,12 +421,42 @@ export function suggestHeyReachPlan(senders: number): HeyReachPlan {
   return "unlimited";
 }
 
-function annualMonthlyEquivalent(monthly: number): number {
-  return monthly;
-}
-
 function applyAnnualDiscount(monthlyPrice: number, discount: number): number {
   return monthlyPrice * (1 - discount);
+}
+
+/** Zero out touch points for excluded channels while preserving stored inputs */
+export function applyChannelVolume(
+  volume: VolumeInputs,
+  channels: ChannelToggles,
+): VolumeInputs {
+  return {
+    ...volume,
+    emailsPerAccount: channels.email ? volume.emailsPerAccount : 0,
+    linkedinTouchPointsPerAccount: channels.linkedin
+      ? volume.linkedinTouchPointsPerAccount
+      : 0,
+    whatsappPerAccount: channels.whatsapp ? volume.whatsappPerAccount : 0,
+  };
+}
+
+function channelIncludesTool(
+  tool: keyof ToolToggles,
+  channels: ChannelToggles,
+): boolean {
+  if (tool === "apollo" || tool === "inboxkit" || tool === "smartlead") {
+    return channels.email;
+  }
+  if (tool === "heyreach") return channels.linkedin;
+  if (tool === "interakt") return channels.whatsapp;
+  return true;
+}
+
+function toolEnabled(
+  config: CalculatorConfig,
+  tool: keyof ToolToggles,
+): boolean {
+  return config.tools[tool] && channelIncludesTool(tool, config.channels);
 }
 
 export function calculateCosts(config: CalculatorConfig): {
@@ -304,12 +465,18 @@ export function calculateCosts(config: CalculatorConfig): {
   totalMonthlyUsd: number;
   warnings: string[];
 } {
-  const derived = deriveVolume(config.volume);
+  const effectiveVolume = applyChannelVolume(config.volume, config.channels);
+  const derived = deriveVolume(effectiveVolume);
   const lineItems: LineItem[] = [];
   const warnings: string[] = [];
   const isAnnual = config.billing === "annual";
+  const { totalAccounts, emailsPerAccount: emailTouchPoints } = {
+    totalAccounts: derived.totalAccounts,
+    emailsPerAccount: effectiveVolume.emailsPerAccount,
+  };
+  const linkedinTouchPoints = effectiveVolume.linkedinTouchPointsPerAccount;
 
-  if (config.tools.apollo) {
+  if (toolEnabled(config, "apollo")) {
     const priceTable = isAnnual ? APOLLO_ANNUAL : APOLLO_MONTHLY;
     let seats = Math.max(1, config.apollo.seats);
     if (config.apollo.plan === "organization") {
@@ -331,63 +498,66 @@ export function calculateCosts(config: CalculatorConfig): {
     });
   }
 
-  if (config.tools.aiArk) {
-    const tier = AI_ARK_MONTHLY[config.aiArk.tier];
-    let price = tier.price;
-    if (isAnnual) {
-      price = applyAnnualDiscount(price, 0.2);
-    }
-    const campaignCredits = derived.aiArkCreditsPerCampaign;
-    if (campaignCredits > tier.credits) {
-      warnings.push(
-        `AI Ark ${config.aiArk.tier} includes ${tier.credits.toLocaleString()} credits/mo; this campaign needs ~${campaignCredits.toLocaleString()}.`,
-      );
-    }
+  if (toolEnabled(config, "aiArk")) {
+    const usageCost = calculateAiArkUsageCost(totalAccounts);
+    const { creditsPerMonth, creditsPerAccount } = USAGE_PRICING.aiArk;
     lineItems.push({
       tool: "AI Ark",
-      label: `${config.aiArk.tier} plan`,
-      amount: price,
-      detail: `${campaignCredits.toLocaleString()} credits/campaign · plan includes ${tier.credits.toLocaleString()}/mo`,
-      creditsUsed: campaignCredits,
-      creditsIncluded: tier.credits,
+      label: `${totalAccounts.toLocaleString()} account(s)`,
+      amount: usageCost,
+      detail: `${creditsPerAccount} credit/account · $49/mo per 5,000 credits`,
+      creditsUsed: derived.aiArkCreditsPerCampaign,
+      creditsIncluded: creditsPerMonth,
     });
   }
 
-  if (config.tools.inboxkit) {
-    const mailboxes = derived.inboxkitMailboxesNeeded;
-    const domains = derived.inboxkitDomainsNeeded;
-    const mailboxCost = mailboxes * config.inboxkit.pricePerMailbox;
-    const domainCostMonthly = (domains * 13) / 12;
+  if (toolEnabled(config, "freckle")) {
+    const usageCost = calculateFreckleUsageCost(totalAccounts);
+    const { creditsPerMonth, creditsPerAccount } = USAGE_PRICING.freckle;
+    lineItems.push({
+      tool: "Freckle",
+      label: `${totalAccounts.toLocaleString()} enrichment(s)`,
+      amount: usageCost,
+      detail: `${creditsPerAccount} credit/enrichment · $189/mo per 5,000 credits`,
+      creditsUsed: derived.freckleCreditsPerCampaign,
+      creditsIncluded: creditsPerMonth,
+    });
+  }
+
+  if (toolEnabled(config, "inboxkit")) {
+    const { domain, inbox, total } = calculateInboxkitUsageCost(
+      totalAccounts,
+      emailTouchPoints,
+    );
+    const accountsPerDomain =
+      (USAGE_PRICING.inboxkit.emailsPerDomainPerDay * DAYS_PER_MONTH) /
+      emailTouchPoints;
     lineItems.push({
       tool: "Inboxkit",
-      label: `${mailboxes} mailbox(es), ${domains} domain(s)`,
-      amount: mailboxCost + domainCostMonthly,
-      detail: `Auto: ${derived.totalEmailsMonthly.toLocaleString()} emails ÷ ${EMAILS_PER_MAILBOX_PER_DAY}/inbox`,
+      label: `Domain (${totalAccounts.toLocaleString()} accounts)`,
+      amount: domain,
+      detail: `($${USAGE_PRICING.inboxkit.domainCostYearly}/12)/mo × ${totalAccounts}/${Math.round(accountsPerDomain)} accounts/domain`,
     });
+    lineItems.push({
+      tool: "Inboxkit",
+      label: `Inboxes (${emailTouchPoints} email touch pts)`,
+      amount: inbox,
+      detail: `$99/30 inboxes · 25 emails/inbox/day · ${(USAGE_PRICING.inboxkit.emailsPerInboxPerDay * DAYS_PER_MONTH) / emailTouchPoints} accounts/inbox`,
+    });
+    if (total === 0 && totalAccounts > 0) {
+      lineItems.pop();
+      lineItems.pop();
+    }
   }
 
-  if (config.tools.smartlead) {
-    let planPrice = SMARTLEAD_MONTHLY[config.smartlead.plan];
-    planPrice = annualMonthlyEquivalent(planPrice);
-    const leadLimit = SMARTLEAD_LEAD_LIMIT[config.smartlead.plan];
-    const sendLimit = SMARTLEAD_SEND_LIMIT[config.smartlead.plan];
-    if (derived.totalAccounts > leadLimit) {
-      warnings.push(
-        `Smartlead ${config.smartlead.plan} supports ${leadLimit === Infinity ? "unlimited" : leadLimit.toLocaleString()} active leads; you have ${derived.totalAccounts.toLocaleString()}.`,
-      );
-    }
-    if (
-      sendLimit !== Infinity &&
-      derived.totalEmailsMonthly > sendLimit
-    ) {
-      warnings.push(
-        `Smartlead ${config.smartlead.plan} monthly send cap is ${sendLimit.toLocaleString()}; you need ~${derived.totalEmailsMonthly.toLocaleString()}.`,
-      );
-    }
+  if (toolEnabled(config, "smartlead")) {
+    const usageCost = calculateSmartleadUsageCost(totalAccounts, emailTouchPoints);
+    const totalSends = totalAccounts * emailTouchPoints;
     lineItems.push({
       tool: "Smartlead",
-      label: `${config.smartlead.plan} plan`,
-      amount: planPrice,
+      label: `${totalSends.toLocaleString()} sends`,
+      amount: usageCost,
+      detail: `$32/mo per 6,000 sends · ${emailTouchPoints} touch pt(s)/account`,
     });
     if (config.smartlead.includeWarmup) {
       lineItems.push({
@@ -398,69 +568,36 @@ export function calculateCosts(config: CalculatorConfig): {
     }
   }
 
-  if (config.tools.heyreach) {
-    const senders =
-      config.heyreach.sendersOverride ?? derived.heyreachSendersNeeded;
-    let heyreachCost = 0;
-    const plan = config.heyreach.plan;
-
-    switch (plan) {
-      case "growth-1":
-        heyreachCost = senders * 79;
-        break;
-      case "growth-5": {
-        const packs = Math.ceil(senders / 5);
-        heyreachCost = packs * 395;
-        break;
-      }
-      case "agency":
-        heyreachCost = 999;
-        if (senders > 50) {
-          warnings.push(
-            `HeyReach Agency covers up to 50 senders; you need ${senders}. Consider Unlimited.`,
-          );
-        }
-        break;
-      case "unlimited":
-        heyreachCost = 1999;
-        if (senders > 500) {
-          warnings.push(
-            `HeyReach Unlimited covers up to 500 senders; you need ${senders}.`,
-          );
-        }
-        break;
-    }
-
-    if (isAnnual && plan === "growth-1") {
-      heyreachCost = senders * 59;
-    }
-    if (isAnnual && plan === "growth-5") {
-      const packs = Math.ceil(senders / 5);
-      heyreachCost = packs * (5 * 59);
-    }
-
+  if (toolEnabled(config, "heyreach")) {
+    const usageCost = calculateHeyReachUsageCost(
+      totalAccounts,
+      linkedinTouchPoints,
+    );
+    const accountsPerSender =
+      linkedinTouchPoints > 0
+        ? (USAGE_PRICING.heyreach.messagesPerSenderPerDay * DAYS_PER_MONTH) /
+          linkedinTouchPoints
+        : 0;
     lineItems.push({
       tool: "HeyReach",
-      label: `${plan} — ${senders} LinkedIn sender(s)`,
-      amount: heyreachCost,
-      detail: `DMs: ${derived.linkedinDmsPerMonth.toLocaleString()}/mo (${LINKEDIN_DM_DAILY_CAP}/sender/day) · Connections: ${derived.linkedinConnectionRequestsPerMonth.toLocaleString()}/mo (${LINKEDIN_CONNECTION_DAILY_CAP}/sender/day)`,
+      label: `${derived.totalLinkedinMessagesMonthly.toLocaleString()} LinkedIn message(s)`,
+      amount: usageCost,
+      detail: `$79/sender · 200 msgs/day · ${Math.round(accountsPerSender)} accounts/sender · ${linkedinTouchPoints} touch pt(s)/account`,
     });
 
-    if (
-      config.heyreach.includeProxies &&
-      (plan === "agency" || plan === "unlimited" || senders > 5)
-    ) {
+    if (config.heyreach.includeProxies && linkedinTouchPoints > 0) {
+      const senders = derived.heyreachSendersNeeded;
       const proxyCost = senders * config.heyreach.proxyCostPerSender;
       lineItems.push({
         tool: "HeyReach",
-        label: `Residential proxies (${senders} accounts)`,
+        label: `Residential proxies (${senders} account(s))`,
         amount: proxyCost,
         detail: `$${config.heyreach.proxyCostPerSender}/account/mo`,
       });
     }
   }
 
-  if (config.tools.interakt) {
+  if (toolEnabled(config, "interakt")) {
     const inrBase = INTERAKT_INR_MONTHLY[config.interakt.plan];
     const baseUsd = inrBase * config.inrToUsd;
     const inrPerMsg = INTERAKT_INR_PER_MESSAGE[config.interakt.messageType];
@@ -491,6 +628,7 @@ export function calculateCosts(config: CalculatorConfig): {
 export const TOOL_LABELS = {
   apollo: "Apollo.io",
   aiArk: "AI Ark",
+  freckle: "Freckle",
   inboxkit: "Inboxkit",
   smartlead: "Smartlead",
   heyreach: "HeyReach",
