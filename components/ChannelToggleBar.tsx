@@ -16,7 +16,7 @@ export function ChannelToggleBar({
   onToggle: (channel: OutreachChannel) => void;
 }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
       {CHANNEL_ORDER.map((channel) => {
         const included = channels[channel];
         const { label, description } = CHANNEL_LABELS[channel];

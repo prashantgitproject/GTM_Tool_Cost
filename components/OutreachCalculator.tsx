@@ -35,6 +35,7 @@ import {
   type InteraktPlan,
   type SmartleadPlan,
   type ToolToggles,
+  type LineItem,
   type VolumeInputs,
 } from "@/lib/pricing";
 
@@ -86,7 +87,7 @@ function Field({
 }
 
 const inputClass =
-  "w-full rounded-lg border border-clarity-border/60 bg-clarity-surface px-3 py-2 text-sm text-clarity-text shadow-sm outline-none transition focus:border-clarity-accent focus:ring-2 focus:ring-clarity-accent/25";
+  "w-full min-w-0 rounded-lg border border-clarity-border/60 bg-clarity-surface px-3 py-2.5 text-base text-clarity-text shadow-sm outline-none transition focus:border-clarity-accent focus:ring-2 focus:ring-clarity-accent/25 sm:py-2 sm:text-sm";
 
 const selectClass = inputClass;
 
@@ -204,8 +205,8 @@ export function OutreachCalculator() {
   const annualTotal = billing === "annual" ? totalMonthlyUsd * 12 : null;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
-      <header className="mb-10">
+    <div className="mx-auto max-w-6xl px-3 py-6 sm:px-6 sm:py-10 lg:px-8">
+      <header className="mb-6 sm:mb-10">
         <div className="flex items-center gap-3">
           <Image
             src={CLARITY_THEME.logoUrl}
@@ -219,7 +220,7 @@ export function OutreachCalculator() {
             {CLARITY_THEME.access.keyName}
           </p>
         </div>
-        <h1 className="mt-3 font-serif text-3xl font-semibold tracking-tight text-clarity-ink sm:text-4xl">
+        <h1 className="mt-3 font-serif text-2xl font-semibold tracking-tight text-clarity-ink sm:text-3xl lg:text-4xl">
           Outreach Tool Cost Calculator
         </h1>
         <p className="mt-3 max-w-2xl text-clarity-muted">
@@ -230,7 +231,7 @@ export function OutreachCalculator() {
         </p>
       </header>
 
-      <section className="mb-8 rounded-2xl border border-clarity-border/60 bg-clarity-surface p-6 shadow-sm">
+      <section className="mb-6 rounded-2xl border border-clarity-border/60 bg-clarity-surface p-4 shadow-sm sm:mb-8 sm:p-6">
         <h2 className="text-lg font-semibold text-clarity-ink">Channels</h2>
         <p className="mt-1 text-sm text-clarity-muted">
           Include or exclude outreach channels. Excluded channels remove related
@@ -241,9 +242,9 @@ export function OutreachCalculator() {
         </div>
       </section>
 
-      <div className="grid gap-8 lg:grid-cols-5">
+      <div className="grid gap-6 lg:grid-cols-5 lg:gap-8">
         <section className="space-y-6 lg:col-span-2">
-          <div className="rounded-2xl border border-clarity-border/60 bg-clarity-surface p-6 shadow-sm">
+          <div className="rounded-2xl border border-clarity-border/60 bg-clarity-surface p-4 shadow-sm sm:p-6">
             <h2 className="text-lg font-semibold text-clarity-ink">
               Campaign volume
             </h2>
@@ -407,7 +408,7 @@ export function OutreachCalculator() {
               ) : null}
             </dl>
 
-            <div className="mt-5 flex flex-wrap gap-3">
+            <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Billing cycle">
                 <select
                   className={selectClass}
@@ -638,18 +639,18 @@ export function OutreachCalculator() {
         </section>
       </div>
 
-      <section className="mt-10 rounded-2xl border border-clarity-border/60 bg-clarity-surface shadow-sm">
-        <div className="flex flex-col gap-4 border-b border-clarity-border/40 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+      <section className="mt-6 overflow-hidden rounded-2xl border border-clarity-border/60 bg-clarity-surface shadow-sm sm:mt-10">
+        <div className="flex flex-col gap-3 border-b border-clarity-border/40 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-6 sm:py-5">
           <h2 className="text-lg font-semibold text-clarity-ink">
             Cost breakdown
           </h2>
-          <div className="text-right">
+          <div className="sm:text-right">
             <p className="text-sm text-clarity-muted">Estimated monthly total (USD)</p>
-            <p className="text-3xl font-bold tabular-nums text-clarity-gold">
+            <p className="text-2xl font-bold tabular-nums text-clarity-gold sm:text-3xl">
               {formatUsd(totalMonthlyUsd)}
             </p>
             {annualTotal !== null ? (
-              <p className="text-sm text-clarity-muted">
+              <p className="text-xs text-clarity-muted sm:text-sm">
                 ~{formatUsd(annualTotal)} if billed annually (12× monthly equivalent)
               </p>
             ) : null}
@@ -657,7 +658,7 @@ export function OutreachCalculator() {
         </div>
 
         {warnings.length > 0 ? (
-          <ul className="border-b border-amber-200 bg-amber-50 px-6 py-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+          <ul className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:px-6 sm:py-4 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
             {warnings.map((w) => (
               <li key={w} className="list-inside list-disc">
                 {w}
@@ -667,71 +668,110 @@ export function OutreachCalculator() {
         ) : null}
 
         {lineItems.length === 0 ? (
-          <p className="px-6 py-8 text-center text-clarity-muted">
+          <p className="px-4 py-8 text-center text-clarity-muted sm:px-6">
             Enable at least one channel and tool to see costs.
           </p>
         ) : (
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-clarity-border/30 text-clarity-muted">
-                <th className="px-6 py-3 font-medium">Tool</th>
-                <th className="px-6 py-3 font-medium">Line item</th>
-                <th className="px-6 py-3 font-medium">Credits / detail</th>
-                <th className="px-6 py-3 text-right font-medium">USD / mo</th>
-              </tr>
-            </thead>
-            <tbody>
+          <>
+            <ul className="divide-y divide-clarity-border/20 md:hidden">
               {lineItems.map((item, i) => (
-                <tr
-                  key={`${item.tool}-${item.label}-${i}`}
-                  className="border-b border-clarity-border/20 last:border-0"
+                <li
+                  key={`mobile-${item.tool}-${item.label}-${i}`}
+                  className="px-4 py-4"
                 >
-                  <td className="px-6 py-3 font-medium text-clarity-ink">
-                    {item.tool}
-                  </td>
-                  <td className="px-6 py-3 text-clarity-text">
-                    {item.label}
-                  </td>
-                  <td className="px-6 py-3 text-clarity-muted">
-                    {item.creditsUsed != null ? (
-                      <span>
-                        <span className="font-medium text-clarity-text">
-                          {item.creditsUsed.toLocaleString()}
-                        </span>
-                        {" / "}
-                        {item.creditsIncluded?.toLocaleString()} included
-                        {item.detail ? ` · ${item.detail}` : ""}
-                      </span>
-                    ) : (
-                      (item.detail ?? "—")
-                    )}
-                  </td>
-                  <td className="px-6 py-3 text-right tabular-nums font-medium">
-                    {formatUsd(item.amount)}
-                  </td>
-                </tr>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-clarity-ink">{item.tool}</p>
+                      <p className="mt-0.5 text-sm text-clarity-text">
+                        {item.label}
+                      </p>
+                    </div>
+                    <p className="shrink-0 text-sm font-semibold tabular-nums text-clarity-ink">
+                      {formatUsd(item.amount)}
+                    </p>
+                  </div>
+                  <p className="mt-2 text-xs leading-relaxed text-clarity-muted">
+                    <LineItemDetail item={item} />
+                  </p>
+                </li>
               ))}
-            </tbody>
-            <tfoot>
-              <tr className="bg-clarity-panel font-semibold">
-                <td colSpan={3} className="px-6 py-4 text-clarity-ink">
-                  Total
-                </td>
-                <td className="px-6 py-4 text-right tabular-nums text-clarity-gold">
+              <li className="flex items-center justify-between bg-clarity-panel px-4 py-4 font-semibold">
+                <span className="text-clarity-ink">Total</span>
+                <span className="tabular-nums text-clarity-gold">
                   {formatUsd(totalMonthlyUsd)}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
+                </span>
+              </li>
+            </ul>
+
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full min-w-[640px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-clarity-border/30 text-clarity-muted">
+                    <th className="px-6 py-3 font-medium">Tool</th>
+                    <th className="px-6 py-3 font-medium">Line item</th>
+                    <th className="px-6 py-3 font-medium">Credits / detail</th>
+                    <th className="px-6 py-3 text-right font-medium">USD / mo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lineItems.map((item, i) => (
+                    <tr
+                      key={`${item.tool}-${item.label}-${i}`}
+                      className="border-b border-clarity-border/20 last:border-0"
+                    >
+                      <td className="px-6 py-3 font-medium text-clarity-ink">
+                        {item.tool}
+                      </td>
+                      <td className="px-6 py-3 text-clarity-text">
+                        {item.label}
+                      </td>
+                      <td className="max-w-xs px-6 py-3 text-clarity-muted">
+                        <LineItemDetail item={item} />
+                      </td>
+                      <td className="px-6 py-3 text-right tabular-nums font-medium">
+                        {formatUsd(item.amount)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-clarity-panel font-semibold">
+                    <td colSpan={3} className="px-6 py-4 text-clarity-ink">
+                      Total
+                    </td>
+                    <td className="px-6 py-4 text-right tabular-nums text-clarity-gold">
+                      {formatUsd(totalMonthlyUsd)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </>
         )}
       </section>
 
-      <p className="mt-6 text-center text-xs text-clarity-steel">
+      <p className="mt-6 px-2 text-center text-xs leading-relaxed text-clarity-steel">
         Estimates based on 2026 public pricing. AI Ark Builder tiers use indicative
         list prices where not published. Verify with vendors before budgeting.
       </p>
     </div>
   );
+}
+
+function LineItemDetail({ item }: { item: LineItem }) {
+  if (item.creditsUsed != null) {
+    return (
+      <>
+        <span className="font-medium text-clarity-text">
+          {item.creditsUsed.toLocaleString()}
+        </span>
+        {" / "}
+        {item.creditsIncluded?.toLocaleString()} included
+        {item.detail ? ` · ${item.detail}` : ""}
+      </>
+    );
+  }
+  return <>{item.detail ?? "—"}</>;
 }
 
 function UsageCostPanel({
@@ -748,24 +788,28 @@ function UsageCostPanel({
   rateLabel: string;
 }) {
   return (
-    <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-clarity-accent-active/40 bg-clarity-accent-active/10 p-4">
-      <div>
+    <div className="mt-4 grid grid-cols-1 gap-3 rounded-xl border border-clarity-accent-active/40 bg-clarity-accent-active/10 p-3 sm:grid-cols-2 sm:p-4">
+      <div className="min-w-0">
         <p className="text-xs font-medium uppercase tracking-wide text-clarity-muted">
           {creditsLabel}
         </p>
-        <p className="mt-1 text-2xl font-bold tabular-nums text-clarity-ink">
+        <p className="mt-1 text-xl font-bold tabular-nums text-clarity-ink sm:text-2xl">
           {credits.toLocaleString()}
         </p>
-        <p className="mt-0.5 text-xs text-clarity-muted">{creditsHint}</p>
+        <p className="mt-0.5 break-words text-xs text-clarity-muted">
+          {creditsHint}
+        </p>
       </div>
-      <div>
+      <div className="min-w-0 border-t border-clarity-accent-active/20 pt-3 sm:border-t-0 sm:pt-0">
         <p className="text-xs font-medium uppercase tracking-wide text-clarity-muted">
           Est. cost / month
         </p>
-        <p className="mt-1 text-2xl font-bold tabular-nums text-clarity-ink">
+        <p className="mt-1 text-xl font-bold tabular-nums text-clarity-ink sm:text-2xl">
           {formatUsd(cost)}
         </p>
-        <p className="mt-0.5 text-xs text-clarity-muted">{rateLabel}</p>
+        <p className="mt-0.5 break-words text-xs text-clarity-muted">
+          {rateLabel}
+        </p>
       </div>
     </div>
   );
@@ -786,23 +830,23 @@ function ToolCard({
 }) {
   return (
     <div
-      className={`rounded-2xl border p-5 transition ${
+      className={`rounded-2xl border p-4 transition sm:p-5 ${
         enabled
           ? "border-clarity-border/60 bg-clarity-surface shadow-sm"
           : "border-clarity-border/30 bg-clarity-panel/60 opacity-60"
       }`}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0 flex-1">
           <h3 className="font-semibold text-clarity-ink">{name}</h3>
-          <p className="mt-0.5 text-xs text-clarity-muted">
+          <p className="mt-0.5 break-words text-xs leading-relaxed text-clarity-muted">
             {description}
           </p>
         </div>
         <button
           type="button"
           onClick={onToggle}
-          className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition ${
+          className={`self-start rounded-full px-3 py-1.5 text-xs font-medium transition sm:shrink-0 ${
             enabled
               ? "bg-clarity-accent-active/30 text-clarity-ink"
               : "bg-clarity-border/30 text-clarity-muted"

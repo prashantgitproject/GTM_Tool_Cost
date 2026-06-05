@@ -30,8 +30,14 @@
   --font-serif: var(--font-clarity-serif);
 }
 
+html {
+  overflow-x: hidden;
+}
+
 body {
   background: var(--clarity-bg);
   color: var(--clarity-text);
   font-family: var(--font-clarity-sans), system-ui, sans-serif;
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
 }
